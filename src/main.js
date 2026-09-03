@@ -3,44 +3,16 @@ import { getState } from "./app/store.js";
 import "./styles/globals.css";
 
 import { getNodeIdentity } from "./core/identity/nodeIdentity.js";
-import { generateKeyPair } from "./core/crypto/keys.js";
-import {
-    signData,
-    verifySignature
-} from "./core/crypto/signature.js";
+import { createWallet } from "./core/wallet/wallet.js";
 
 const nodeIdentity = getNodeIdentity();
+const wallet = await createWallet();
 
-const keyPair = await generateKeyPair();
-
-const transactionData = JSON.stringify({
-    from: nodeIdentity.nodeId,
-    to: "recipient-node",
-    amount: 10,
-    nonce: 1
-});
-
-const signature = await signData(
-    keyPair.privateKey,
-    transactionData
-);
-
-const valid = await verifySignature(
-    keyPair.publicKey,
-    transactionData,
-    signature
-);
-
-const tampered = await verifySignature(
-    keyPair.publicKey,
-    transactionData.replace("10", "1000"),
-    signature
-);
-
-console.log("Node:", nodeIdentity.nodeId);
-console.log("Signature:", signature);
-console.log("Valid signature:", valid);
-console.log("Tampered transaction valid:", tampered);
+console.log("NovaChain Node:", nodeIdentity.nodeId);
+console.log("NovaChain Wallet:", wallet);
+console.log("Wallet Address:", wallet.address);
+console.log("Public Key:", wallet.publicKey);
+console.log("Private Key:", wallet.privateKey);
 
 function render() {
     const state = getState();
