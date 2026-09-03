@@ -3,62 +3,102 @@ import { getState } from "./app/store.js";
 import "./styles/globals.css";
 
 //test
-
 import { getNodeIdentity } from "./core/identity/nodeIdentity.js";
 import { createWallet } from "./core/wallet/wallet.js";
+
 import {
     createTransaction,
     signTransaction,
-    serializeTransaction
 } from "./core/transaction/transaction.js";
 
+import {
+    verifyTransactionSignature,
+} from "./core/transaction/validator.js";
+
+import {
+    createUTXO,
+    getBalance,
+    selectUTXOs,
+} from "./core/transaction/utxo.js";
+
 const nodeIdentity = getNodeIdentity();
+
 const wallet = await createWallet();
 
+const genesisUTXO = createUTXO({
+    transactionId: "genesis-test",
+    outputIndex: 0,
+    address: wallet.address,
+    amount: 10_000_000,
+});
+
+const utxos = [genesisUTXO];
+
+console.log(
+    "Initial balance:",
+    getBalance(utxos, wallet.address),
+    "NNC"
+);
+
+const paymentAmount = 3_000_000;
+
+const selection = selectUTXOs(
+    utxos,
+    wallet.address,
+    paymentAmount
+);
+
+console.log("Selected UTXOs:", selection.selected);
+console.log("Selected total:", selection.total);
+console.log("Change:", selection.change);
+
 const transaction = createTransaction({
-    inputs: [
-        {
-            transactionId: "previous-transaction-example",
-            outputIndex: 0,
-        }
-    ],
+    inputs: selection.selected.map((utxo) => ({
+        transactionId: utxo.transactionId,
+        outputIndex: utxo.outputIndex,
+    })),
+
     outputs: [
         {
-            address: "NVCrecipient123456789",
-            amount: 1000000,
-        }
+            address: "NVCrecipient123",
+            amount: paymentAmount,
+        },
+        {
+            address: wallet.address,
+            amount: selection.change,
+        },
     ],
 });
 
 await signTransaction(
     transaction,
-    wallet.privateKey
+    wallet.privateKey,
+    wallet.publicKey
 );
 
-console.log("NovaChain Node:", nodeIdentity.nodeId);
-console.log("Wallet:", wallet.address);
 console.log("Transaction:", transaction);
 console.log(
-    "Serialized transaction:",
-    serializeTransaction(transaction)
+    "Transaction ID:",
+    transaction.id
 );
-import { verifyTransactionSignature } from "./core/transaction/validator.js";
 
 const valid = await verifyTransactionSignature(
-    transaction,
-    wallet.publicKey
+    transaction
 );
 
-console.log("Transaction signature valid:", valid);
-
-transaction.outputs[0].amount = 2000000;
-
-const tampered = await verifyTransactionSignature(
-    transaction,
-    wallet.publicKey
+console.log(
+    "Transaction signature valid:",
+    valid
 );
+transaction.outputs[0].amount = 9_000_000;
 
-console.log("Tampered transaction valid:", tampered);
+const tamperedValid =
+    await verifyTransactionSignature(transaction);
+
+console.log(
+    "Tampered transaction valid:",
+    tamperedValid
+);
 //Test End
 function render() {
     const state = getState();
