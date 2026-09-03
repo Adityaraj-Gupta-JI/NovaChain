@@ -2,18 +2,64 @@ import { APP_CONFIG } from "./app/config.js";
 import { getState } from "./app/store.js";
 import "./styles/globals.css";
 
+//test
+
 import { getNodeIdentity } from "./core/identity/nodeIdentity.js";
 import { createWallet } from "./core/wallet/wallet.js";
+import {
+    createTransaction,
+    signTransaction,
+    serializeTransaction
+} from "./core/transaction/transaction.js";
 
 const nodeIdentity = getNodeIdentity();
 const wallet = await createWallet();
 
-console.log("NovaChain Node:", nodeIdentity.nodeId);
-console.log("NovaChain Wallet:", wallet);
-console.log("Wallet Address:", wallet.address);
-console.log("Public Key:", wallet.publicKey);
-console.log("Private Key:", wallet.privateKey);
+const transaction = createTransaction({
+    inputs: [
+        {
+            transactionId: "previous-transaction-example",
+            outputIndex: 0,
+        }
+    ],
+    outputs: [
+        {
+            address: "NVCrecipient123456789",
+            amount: 1000000,
+        }
+    ],
+});
 
+await signTransaction(
+    transaction,
+    wallet.privateKey
+);
+
+console.log("NovaChain Node:", nodeIdentity.nodeId);
+console.log("Wallet:", wallet.address);
+console.log("Transaction:", transaction);
+console.log(
+    "Serialized transaction:",
+    serializeTransaction(transaction)
+);
+import { verifyTransactionSignature } from "./core/transaction/validator.js";
+
+const valid = await verifyTransactionSignature(
+    transaction,
+    wallet.publicKey
+);
+
+console.log("Transaction signature valid:", valid);
+
+transaction.outputs[0].amount = 2000000;
+
+const tampered = await verifyTransactionSignature(
+    transaction,
+    wallet.publicKey
+);
+
+console.log("Tampered transaction valid:", tampered);
+//Test End
 function render() {
     const state = getState();
 
