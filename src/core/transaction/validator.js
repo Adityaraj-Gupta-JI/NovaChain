@@ -3,7 +3,12 @@
 // File: src/core/transaction/validator.js
 // ============================================================
 
-import { verifySignature } from "../crypto/signature.js";
+import { sha256 } from "../crypto/hash.js";
+
+import {
+    verifySignature,
+} from "../crypto/signature.js";
+
 import {
     serializeTransaction,
 } from "./transaction.js";
@@ -16,15 +21,40 @@ import {
 } from "./utxo.js";
 
 
-/**
- * Verify the cryptographic signature attached
- * to a transaction input.
- *
- * @param {Object} transaction
- * @param {Object} input
- *
- * @returns {Promise<boolean>}
- */
+// ============================================================
+// PUBLIC KEY → NOVACHAIN ADDRESS
+// ============================================================
+
+async function deriveAddressFromPublicKey(
+    publicKeyJwk
+) {
+    if (
+        !publicKeyJwk ||
+        typeof publicKeyJwk !== "object"
+    ) {
+        throw new Error(
+            "Public key JWK is required."
+        );
+    }
+
+    const publicKeyData =
+        JSON.stringify(
+            publicKeyJwk
+        );
+
+    const publicKeyHash =
+        await sha256(
+            publicKeyData
+        );
+
+    return `NVC${publicKeyHash.slice(0, 40)}`;
+}
+
+
+// ============================================================
+// INPUT SIGNATURE VERIFICATION
+// ============================================================
+
 async function verifyInputSignature(
     transaction,
     input
@@ -32,31 +62,34 @@ async function verifyInputSignature(
     if (
         !input ||
         !input.publicKey ||
-        !input.signature
+        !Array.isArray(input.signature)
     ) {
         return false;
     }
 
     try {
         /*
-         * Import the public key supplied by
-         * the transaction.
+         * Import the sender's public key.
          */
         const publicKey =
             await crypto.subtle.importKey(
                 "jwk",
+
                 input.publicKey,
+
                 {
                     name: "ECDSA",
                     namedCurve: "P-256",
                 },
+
                 true,
+
                 ["verify"]
             );
 
         /*
-         * Reconstruct the exact transaction
-         * payload that was originally signed.
+         * Recreate exactly the canonical payload
+         * that was signed by the sender.
          */
         const payload =
             serializeTransaction(
@@ -66,37 +99,47 @@ async function verifyInputSignature(
         /*
          * Verify the ECDSA signature.
          */
-        return await verifySignature(
-            publicKey,
-            payload,
-            new Uint8Array(
-                input.signature
-            )
-        );
+        const signatureValid =
+            await verifySignature(
+                publicKey,
+                payload,
+                new Uint8Array(
+                    input.signature
+                )
+            );
+
+        if (!signatureValid) {
+            return false;
+        }
+
+        return true;
     } catch {
         return false;
     }
 }
 
 
-/**
- * Verify all transaction input signatures.
- *
- * @param {Object} transaction
- *
- * @returns {Promise<boolean>}
- */
+// ============================================================
+// TRANSACTION SIGNATURE VALIDATION
+// ============================================================
+
 export async function verifyTransactionSignature(
     transaction
 ) {
+    /*
+     * Coinbase transactions are not signed by a wallet.
+     */
+    if (
+        transaction?.type === "coinbase"
+    ) {
+        return true;
+    }
+
     if (
         !transaction ||
-        transaction.type === "coinbase"
+        transaction.type !== "payment"
     ) {
-        /*
-         * Coinbase transactions are not signed.
-         */
-        return transaction?.type === "coinbase";
+        return false;
     }
 
     if (
@@ -106,6 +149,12 @@ export async function verifyTransactionSignature(
         return false;
     }
 
+    /*
+     * Every input must carry a valid signature.
+     *
+     * NovaChain MVP currently uses a single wallet
+     * key for all selected UTXOs in one payment.
+     */
     for (
         const input of transaction.inputs
     ) {
@@ -124,13 +173,10 @@ export async function verifyTransactionSignature(
 }
 
 
-/**
- * Validate the basic structure of a transaction.
- *
- * @param {Object} transaction
- *
- * @returns {boolean}
- */
+// ============================================================
+// TRANSACTION STRUCTURE
+// ============================================================
+
 export function validateTransactionStructure(
     transaction
 ) {
@@ -165,7 +211,9 @@ export function validateTransactionStructure(
 
     if (
         typeof transaction.id !== "string" ||
-        transaction.id.length !== 64
+        !/^[0-9a-f]{64}$/.test(
+            transaction.id
+        )
     ) {
         return false;
     }
@@ -208,9 +256,6 @@ export function validateTransactionStructure(
         }
     }
 
-    /*
-     * Payment transactions require inputs.
-     */
     if (
         transaction.type === "payment" &&
         transaction.inputs.length === 0
@@ -218,9 +263,6 @@ export function validateTransactionStructure(
         return false;
     }
 
-    /*
-     * Coinbase transactions must not have inputs.
-     */
     if (
         transaction.type === "coinbase" &&
         transaction.inputs.length !== 0
@@ -232,22 +274,19 @@ export function validateTransactionStructure(
 }
 
 
-/**
- * Validate that a transaction's referenced UTXOs
- * exist and are not duplicated.
- *
- * @param {Object} transaction
- * @param {Array} utxos
- *
- * @returns {boolean}
- */
+// ============================================================
+// TRANSACTION INPUT VALIDATION
+// ============================================================
+
 export function validateTransactionInputs(
     transaction,
     utxos
 ) {
     if (
         !transaction ||
-        !Array.isArray(transaction.inputs) ||
+        !Array.isArray(
+            transaction.inputs
+        ) ||
         !Array.isArray(utxos)
     ) {
         return false;
@@ -261,8 +300,10 @@ export function validateTransactionInputs(
     ) {
         if (
             !input ||
-            typeof input.transactionId !==
-                "string" ||
+            typeof input.transactionId !== "string" ||
+            !/^[0-9a-f]{64}$/.test(
+                input.transactionId
+            ) ||
             !Number.isInteger(
                 input.outputIndex
             ) ||
@@ -278,8 +319,8 @@ export function validateTransactionInputs(
             );
 
         /*
-         * Prevent the same UTXO from being
-         * referenced twice within one transaction.
+         * Double-spending the same UTXO inside
+         * one transaction is invalid.
          */
         if (
             usedInputs.has(key)
@@ -290,7 +331,7 @@ export function validateTransactionInputs(
         usedInputs.add(key);
 
         /*
-         * The referenced UTXO must currently exist.
+         * Referenced UTXO must exist.
          */
         const utxo =
             findUTXO(
@@ -308,31 +349,15 @@ export function validateTransactionInputs(
 }
 
 
-/**
- * Validate transaction value conservation.
- *
- * For a normal payment:
- *
- * input value >= output value
- *
- * The difference represents the transaction fee
- * in the current NovaChain model.
- *
- * @param {Object} transaction
- * @param {Array} utxos
- *
- * @returns {boolean}
- */
+// ============================================================
+// TRANSACTION VALUE VALIDATION
+// ============================================================
+
 export function validateTransactionValues(
     transaction,
     utxos
 ) {
     try {
-        /*
-         * Coinbase transactions create new
-         * currency and therefore do not use
-         * normal input/output conservation.
-         */
         if (
             transaction.type === "coinbase"
         ) {
@@ -350,6 +375,9 @@ export function validateTransactionValues(
                 transaction
             );
 
+        /*
+         * A transaction cannot create value.
+         */
         return (
             inputValue >= outputValue
         );
@@ -359,31 +387,70 @@ export function validateTransactionValues(
 }
 
 
-/**
- * Complete transaction validation.
- *
- * This is the main validator entry point.
- *
- * Validation layers:
- *
- * 1. Structure
- * 2. Input references
- * 3. Value conservation
- * 4. Cryptographic signatures
- *
- * @param {Object} transaction
- * @param {Array} utxos
- *
- * @returns {Promise<boolean>}
- */
+// ============================================================
+// INPUT OWNERSHIP VALIDATION
+// ============================================================
+
+export async function validateTransactionOwnership(
+    transaction,
+    utxos
+) {
+    if (
+        transaction.type === "coinbase"
+    ) {
+        return true;
+    }
+
+    try {
+        for (
+            const input of transaction.inputs
+        ) {
+            const utxo =
+                findUTXO(
+                    utxos,
+                    input.transactionId,
+                    input.outputIndex
+                );
+
+            if (!utxo) {
+                return false;
+            }
+
+            /*
+             * The public key supplied with the input
+             * must derive to the address that owns
+             * the referenced UTXO.
+             */
+            const derivedAddress =
+                await deriveAddressFromPublicKey(
+                    input.publicKey
+                );
+
+            if (
+                derivedAddress !==
+                utxo.address
+            ) {
+                return false;
+            }
+        }
+
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+
+// ============================================================
+// COMPLETE TRANSACTION VALIDATION
+// ============================================================
+
 export async function validateTransaction(
     transaction,
     utxos
 ) {
     /*
-     * --------------------------------------------------------
-     * 1. Structural validation
-     * --------------------------------------------------------
+     * 1. Basic structure.
      */
     if (
         !validateTransactionStructure(
@@ -394,24 +461,18 @@ export async function validateTransaction(
     }
 
     /*
-     * --------------------------------------------------------
-     * Coinbase validation
-     * --------------------------------------------------------
+     * 2. Coinbase transactions do not require
+     * wallet signatures.
      */
     if (
         transaction.type === "coinbase"
     ) {
-        /*
-         * Coinbase has no inputs and therefore
-         * does not require signature validation.
-         */
         return true;
     }
 
     /*
-     * --------------------------------------------------------
-     * 2. Validate referenced UTXOs
-     * --------------------------------------------------------
+     * 3. Inputs must reference existing,
+     * non-duplicated UTXOs.
      */
     if (
         !validateTransactionInputs(
@@ -423,9 +484,8 @@ export async function validateTransaction(
     }
 
     /*
-     * --------------------------------------------------------
-     * 3. Validate input/output value conservation
-     * --------------------------------------------------------
+     * 4. Sender cannot spend more than
+     * the value contained in referenced UTXOs.
      */
     if (
         !validateTransactionValues(
@@ -437,9 +497,21 @@ export async function validateTransaction(
     }
 
     /*
-     * --------------------------------------------------------
-     * 4. Validate cryptographic signatures
-     * --------------------------------------------------------
+     * 5. Public key must actually own the
+     * referenced UTXO.
+     */
+    if (
+        !(await validateTransactionOwnership(
+            transaction,
+            utxos
+        ))
+    ) {
+        return false;
+    }
+
+    /*
+     * 6. Finally verify the cryptographic
+     * signature over the canonical payload.
      */
     if (
         !(await verifyTransactionSignature(
