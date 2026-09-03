@@ -2,15 +2,45 @@ import { APP_CONFIG } from "./app/config.js";
 import { getState } from "./app/store.js";
 import "./styles/globals.css";
 
-
 import { getNodeIdentity } from "./core/identity/nodeIdentity.js";
-
-const app = document.querySelector("#app");
+import { generateKeyPair } from "./core/crypto/keys.js";
+import {
+    signData,
+    verifySignature
+} from "./core/crypto/signature.js";
 
 const nodeIdentity = getNodeIdentity();
-console.log("NovaChain Node Identity:", nodeIdentity);
 
+const keyPair = await generateKeyPair();
 
+const transactionData = JSON.stringify({
+    from: nodeIdentity.nodeId,
+    to: "recipient-node",
+    amount: 10,
+    nonce: 1
+});
+
+const signature = await signData(
+    keyPair.privateKey,
+    transactionData
+);
+
+const valid = await verifySignature(
+    keyPair.publicKey,
+    transactionData,
+    signature
+);
+
+const tampered = await verifySignature(
+    keyPair.publicKey,
+    transactionData.replace("10", "1000"),
+    signature
+);
+
+console.log("Node:", nodeIdentity.nodeId);
+console.log("Signature:", signature);
+console.log("Valid signature:", valid);
+console.log("Tampered transaction valid:", tampered);
 
 function render() {
     const state = getState();
