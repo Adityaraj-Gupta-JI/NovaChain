@@ -2,12 +2,15 @@ import { APP_CONFIG } from "./app/config.js";
 import { getState } from "./app/store.js";
 import "./styles/globals.css";
 
+
 import { getNodeIdentity } from "./core/identity/nodeIdentity.js";
 
 const app = document.querySelector("#app");
 
 const nodeIdentity = getNodeIdentity();
 console.log("NovaChain Node Identity:", nodeIdentity);
+
+
 
 function render() {
     const state = getState();
