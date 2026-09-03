@@ -1,0 +1,18 @@
+{
+  "name": "novachain",
+  "version": "1.0.0",
+  "description": "NovaChain - A Browser-Native Decentralized Payment Network with a Visual Consensus Engine",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "vite": "^8.2.2"
+  },
+  "private": "true"
+}
