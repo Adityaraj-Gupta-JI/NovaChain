@@ -1,35 +1,26 @@
-import { calculateBlockHash } from "../block/block.js";
+import {
+    calculateBlockHash,
+} from "../block/block.js";
 
-/**
- * Mine a block using Proof of Work.
- *
- * NovaChain represents mining difficulty as the number
- * of leading hexadecimal zeroes required in the block hash.
- *
- * Example:
- *
- * difficulty = 3
- *
- * Valid:
- * 000abc123...
- *
- * Invalid:
- * 001abc123...
- *
- * Mining is intentionally asynchronous so the browser UI
- * remains responsive while Proof of Work is running.
- */
+/*
+|--------------------------------------------------------------------------
+| NovaChain Proof of Work
+|--------------------------------------------------------------------------
+*/
+
 export async function mineBlock(
     block,
     {
         onProgress,
         signal,
         yieldEvery = 100,
+        startNonce = 0,
     } = {}
 ) {
     if (
         !block ||
-        typeof block !== "object"
+        typeof block !==
+            "object"
     ) {
         throw new TypeError(
             "A valid block is required."
@@ -37,7 +28,9 @@ export async function mineBlock(
     }
 
     if (
-        !Number.isInteger(block.difficulty) ||
+        !Number.isInteger(
+            block.difficulty
+        ) ||
         block.difficulty < 0 ||
         block.difficulty > 64
     ) {
@@ -47,7 +40,20 @@ export async function mineBlock(
     }
 
     if (
-        !Number.isInteger(yieldEvery) ||
+        !Number.isSafeInteger(
+            startNonce
+        ) ||
+        startNonce < 0
+    ) {
+        throw new Error(
+            "Invalid starting nonce."
+        );
+    }
+
+    if (
+        !Number.isInteger(
+            yieldEvery
+        ) ||
         yieldEvery <= 0
     ) {
         throw new Error(
@@ -55,92 +61,84 @@ export async function mineBlock(
         );
     }
 
-    /*
-     * Difficulty 0 means every valid hash satisfies
-     * the Proof of Work target.
-     */
     const targetPrefix =
-        "0".repeat(block.difficulty);
+        "0".repeat(
+            block.difficulty
+        );
 
-    /*
-     * Continue from the block's current nonce when possible.
-     */
     let nonce =
-        Number.isSafeInteger(block.nonce) &&
-        block.nonce >= 0
-            ? block.nonce
-            : 0;
+        startNonce;
 
     while (true) {
-        /*
-         * Allow the caller to cancel mining.
-         */
-        if (signal?.aborted) {
+        if (
+            signal?.aborted
+        ) {
             throw new DOMException(
                 "Mining cancelled.",
                 "AbortError"
             );
         }
 
-        /*
-         * Set the candidate nonce.
-         */
-        block.nonce = nonce;
+        if (
+            !Number.isSafeInteger(
+                nonce
+            )
+        ) {
+            throw new Error(
+                "Nonce space exhausted."
+            );
+        }
 
-        /*
-         * Calculate the candidate block hash.
-         */
+        block.nonce =
+            nonce;
+
         block.hash =
-            await calculateBlockHash(block);
+            await calculateBlockHash(
+                block
+            );
 
-        /*
-         * Check whether the hash satisfies
-         * the Proof of Work target.
-         */
+        const progress = {
+            nonce,
+            hash:
+                block.hash,
+            difficulty:
+                block.difficulty,
+            targetPrefix,
+            completed:
+                false,
+        };
+
         if (
             block.hash.startsWith(
                 targetPrefix
             )
         ) {
-            /*
-             * Final valid mined block.
-             */
             onProgress?.({
-                nonce,
-                hash: block.hash,
-                difficulty: block.difficulty,
-                completed: true,
+                ...progress,
+                completed:
+                    true,
             });
 
             return block;
         }
 
-        /*
-         * Try the next nonce.
-         */
-        nonce++;
+        nonce += 1;
 
-        /*
-         * Periodically yield execution back to
-         * the browser so the UI does not freeze.
-         */
         if (
-            nonce % yieldEvery === 0
+            nonce %
+            yieldEvery ===
+            0
         ) {
-            onProgress?.({
-                nonce,
-                hash: block.hash,
-                difficulty: block.difficulty,
-                completed: false,
-            });
+            onProgress?.(
+                progress
+            );
 
             await new Promise(
-                (resolve) => {
+                (resolve) =>
                     setTimeout(
                         resolve,
                         0
-                    );
-                }
+                    )
             );
         }
     }

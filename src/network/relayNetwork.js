@@ -1,107 +1,352 @@
-/*
- * NovaChain browser network transport.
- *
- * MVP transport:
- * Browser Node
- *      ↓
- * WebSocket
- *      ↓
- * NCCP Relay
- *      ↓
- * Other Browser Nodes
- *
- * The relay does NOT own the blockchain ledger.
- * Each browser keeps its own Blockchain / UTXO / Mempool / IndexedDB state.
- *
- * Supported NCCP message types:
- *   join
- *   state-request
- *   state-response
- *   transaction
- *   block
- */
+const DEFAULT_SIGNALING_URL =
+    "ws://localhost:8787";
 
-const DEFAULT_SIGNALING_URL = "ws://localhost:8787";
+/*
+|--------------------------------------------------------------------------
+| Binary-safe wire encoding
+|--------------------------------------------------------------------------
+|
+| WebSocket transport uses JSON.
+|
+| ECDSA signatures may contain Uint8Array /
+| ArrayBuffer data.
+|
+| We encode these values explicitly instead
+| of letting JSON.stringify transform them
+| into ordinary objects.
+|--------------------------------------------------------------------------
+*/
+
+function bytesToBase64(
+    bytes
+) {
+    const array =
+        bytes instanceof Uint8Array
+            ? bytes
+            : new Uint8Array(
+                bytes
+            );
+
+    let binary =
+        "";
+
+    const chunkSize =
+        0x8000;
+
+    for (
+        let index = 0;
+        index < array.length;
+        index += chunkSize
+    ) {
+        binary +=
+            String.fromCharCode(
+                ...array.subarray(
+                    index,
+                    index +
+                        chunkSize
+                )
+            );
+    }
+
+    return btoa(
+        binary
+    );
+}
+
+function base64ToBytes(
+    value
+) {
+    const binary =
+        atob(value);
+
+    const bytes =
+        new Uint8Array(
+            binary.length
+        );
+
+    for (
+        let index = 0;
+        index <
+        binary.length;
+        index += 1
+    ) {
+        bytes[index] =
+            binary.charCodeAt(
+                index
+            );
+    }
+
+    return bytes;
+}
+
+function encodeForWire(
+    value
+) {
+    if (
+        value instanceof
+        Uint8Array
+    ) {
+        return {
+            __ncType:
+                "bytes",
+
+            value:
+                bytesToBase64(
+                    value
+                ),
+        };
+    }
+
+    if (
+        value instanceof
+        ArrayBuffer
+    ) {
+        return {
+            __ncType:
+                "bytes",
+
+            value:
+                bytesToBase64(
+                    value
+                ),
+        };
+    }
+
+    if (
+        Array.isArray(value)
+    ) {
+        return value.map(
+            encodeForWire
+        );
+    }
+
+    if (
+        value &&
+        typeof value ===
+            "object"
+    ) {
+        const output =
+            {};
+
+        for (
+            const [
+                key,
+                child,
+            ] of Object.entries(
+                value
+            )
+        ) {
+            output[key] =
+                encodeForWire(
+                    child
+                );
+        }
+
+        return output;
+    }
+
+    return value;
+}
+
+function decodeFromWire(
+    value
+) {
+    if (
+        Array.isArray(value)
+    ) {
+        return value.map(
+            decodeFromWire
+        );
+    }
+
+    if (
+        value &&
+        typeof value ===
+            "object"
+    ) {
+        if (
+            value.__ncType ===
+                "bytes" &&
+            typeof value.value ===
+                "string"
+        ) {
+            return base64ToBytes(
+                value.value
+            );
+        }
+
+        const output =
+            {};
+
+        for (
+            const [
+                key,
+                child,
+            ] of Object.entries(
+                value
+            )
+        ) {
+            output[key] =
+                decodeFromWire(
+                    child
+                );
+        }
+
+        return output;
+    }
+
+    return value;
+}
+
+function createMessageId() {
+    if (
+        globalThis.crypto
+            ?.randomUUID
+    ) {
+        return crypto.randomUUID();
+    }
+
+    return (
+        `nc-${Date.now()}-` +
+        Math.random()
+            .toString(16)
+            .slice(2)
+    );
+}
 
 export class RelayNetwork {
     constructor({
         nodeId,
         walletAddress,
-        signalingUrl = DEFAULT_SIGNALING_URL,
+        signalingUrl =
+            DEFAULT_SIGNALING_URL,
         onMessage,
         onStatus,
     } = {}) {
-        this.nodeId = nodeId ?? null;
-        this.walletAddress = walletAddress ?? null;
-        this.signalingUrl = signalingUrl;
-        this.onMessage = onMessage;
-        this.onStatus = onStatus;
+        this.nodeId =
+            nodeId ??
+            null;
 
-        this.socket = null;
-        this.connected = false;
-        this.destroyed = false;
+        this.walletAddress =
+            walletAddress ??
+            null;
 
-        this.reconnectTimer = null;
-        this.reconnectAttempt = 0;
+        this.signalingUrl =
+            signalingUrl;
+
+        this.onMessage =
+            onMessage;
+
+        this.onStatus =
+            onStatus;
+
+        this.socket =
+            null;
+
+        this.connected =
+            false;
+
+        this.destroyed =
+            false;
+
+        this.reconnectTimer =
+            null;
+
+        this.reconnectAttempt =
+            0;
+
+        this.seenMessages =
+            new Set();
 
         this.statusSnapshot = {
-            status: "OFFLINE",
-            peerCount: 0,
-            connected: false,
-            url: this.signalingUrl,
-            error: null,
+            status:
+                "OFFLINE",
+
+            peerCount:
+                0,
+
+            connected:
+                false,
+
+            url:
+                signalingUrl,
+
+            error:
+                null,
         };
     }
 
     connect() {
-        if (this.destroyed) {
+        if (
+            this.destroyed
+        ) {
             return;
         }
 
         if (
             this.socket &&
             (
-                this.socket.readyState === WebSocket.OPEN ||
-                this.socket.readyState === WebSocket.CONNECTING
+                this.socket
+                    .readyState ===
+                    WebSocket.OPEN ||
+                this.socket
+                    .readyState ===
+                    WebSocket.CONNECTING
             )
         ) {
             return;
         }
 
-        this.setStatus("CONNECTING");
+        this.setStatus(
+            "CONNECTING"
+        );
 
         try {
-            this.socket = new WebSocket(
-                this.signalingUrl
-            );
-        } catch (error) {
+            this.socket =
+                new WebSocket(
+                    this.signalingUrl
+                );
+        } catch (
+            error
+        ) {
             this.setStatus(
                 "OFFLINE",
                 error
             );
 
             this.scheduleReconnect();
+
             return;
         }
 
         this.socket.addEventListener(
             "open",
             () => {
-                this.connected = true;
-                this.reconnectAttempt = 0;
+                this.connected =
+                    true;
+
+                this.reconnectAttempt =
+                    0;
 
                 this.setStatus(
                     "ONLINE"
                 );
 
                 this.send({
-                    type: "join",
-                    nodeId: this.nodeId,
+                    type:
+                        "join",
+
+                    nodeId:
+                        this.nodeId,
+
                     walletAddress:
                         this.walletAddress,
-                    network: "nova-main",
-                    protocol: "NCCP-0.1",
-                    timestamp: Date.now(),
+
+                    network:
+                        "nova-main",
+
+                    protocol:
+                        "NCCP-0.2",
                 });
             }
         );
@@ -118,13 +363,16 @@ export class RelayNetwork {
         this.socket.addEventListener(
             "close",
             () => {
-                this.connected = false;
+                this.connected =
+                    false;
 
                 this.setStatus(
                     "OFFLINE"
                 );
 
-                if (!this.destroyed) {
+                if (
+                    !this.destroyed
+                ) {
                     this.scheduleReconnect();
                 }
             }
@@ -142,33 +390,40 @@ export class RelayNetwork {
     }
 
     disconnect() {
-        this.destroyed = true;
+        this.destroyed =
+            true;
 
-        if (this.reconnectTimer) {
+        if (
+            this.reconnectTimer
+        ) {
             clearTimeout(
                 this.reconnectTimer
             );
-
-            this.reconnectTimer = null;
         }
 
-        if (this.socket) {
-            try {
-                this.socket.close();
-            } catch {
-                // Ignore close errors.
-            }
+        this.reconnectTimer =
+            null;
+
+        try {
+            this.socket?.close();
+        } catch {
+            // Ignore close errors.
         }
 
-        this.socket = null;
-        this.connected = false;
+        this.socket =
+            null;
+
+        this.connected =
+            false;
 
         this.setStatus(
             "OFFLINE"
         );
     }
 
-    send(message) {
+    send(
+        message
+    ) {
         if (
             !this.socket ||
             this.socket.readyState !==
@@ -177,30 +432,41 @@ export class RelayNetwork {
             return false;
         }
 
-        try {
-            const envelope = {
+        const wireMessage =
+            encodeForWire({
                 ...message,
+
+                messageId:
+                    message.messageId ??
+                    createMessageId(),
 
                 senderNodeId:
                     this.nodeId,
 
                 protocol:
                     message.protocol ??
-                    "NCCP-0.1",
+                    "NCCP-0.2",
+
+                network:
+                    message.network ??
+                    "nova-main",
 
                 timestamp:
                     message.timestamp ??
                     Date.now(),
-            };
+            });
 
+        try {
             this.socket.send(
                 JSON.stringify(
-                    envelope
+                    wireMessage
                 )
             );
 
             return true;
-        } catch (error) {
+        } catch (
+            error
+        ) {
             console.error(
                 "NovaChain network send failed:",
                 error
@@ -212,7 +478,9 @@ export class RelayNetwork {
 
     requestState() {
         return this.send({
-            type: "state-request",
+            type:
+                "state-request",
+
             requesterNodeId:
                 this.nodeId,
         });
@@ -222,91 +490,133 @@ export class RelayNetwork {
         transaction
     ) {
         return this.send({
-            type: "transaction",
+            type:
+                "transaction",
+
             transaction,
         });
     }
 
-    broadcastBlock(block) {
+    broadcastBlock(
+        block
+    ) {
         return this.send({
-            type: "block",
+            type:
+                "block",
+
             block,
         });
     }
 
-    broadcastState(state) {
+    sendStateTo(
+        recipientNodeId,
+        state
+    ) {
         return this.send({
-            type: "state-response",
+            type:
+                "state-response",
+
+            recipientNodeId,
+
             state,
         });
     }
 
-    handleMessage(rawData) {
-        let message;
-
+    handleMessage(
+        rawData
+    ) {
         try {
-            message =
-                typeof rawData === "string"
-                    ? JSON.parse(rawData)
+            const parsed =
+                typeof rawData ===
+                    "string"
+                    ? JSON.parse(
+                        rawData
+                    )
                     : rawData;
-        } catch (error) {
+
+            const message =
+                decodeFromWire(
+                    parsed
+                );
+
+            if (
+                !message ||
+                typeof message.type !==
+                    "string"
+            ) {
+                return;
+            }
+
+            if (
+                message.messageId
+            ) {
+                if (
+                    this.seenMessages.has(
+                        message.messageId
+                    )
+                ) {
+                    return;
+                }
+
+                this.seenMessages.add(
+                    message.messageId
+                );
+
+                if (
+                    this.seenMessages.size >
+                    2000
+                ) {
+                    const first =
+                        this.seenMessages
+                            .values()
+                            .next()
+                            .value;
+
+                    this.seenMessages.delete(
+                        first
+                    );
+                }
+            }
+
+            if (
+                message.peerCount !==
+                undefined
+            ) {
+                this.statusSnapshot = {
+                    ...this
+                        .statusSnapshot,
+
+                    peerCount:
+                        Number(
+                            message.peerCount
+                        ) || 0,
+
+                    connected:
+                        this.connected,
+                };
+
+                this.onStatus?.(
+                    this.statusSnapshot
+                );
+            }
+
+            Promise.resolve(
+                this.onMessage?.(
+                    message
+                )
+            ).catch(
+                (error) => {
+                    console.error(
+                        "NovaChain network message handler failed:",
+                        error
+                    );
+                }
+            );
+        } catch (
+            error
+        ) {
             console.warn(
-                "NovaChain received invalid network JSON.",
-                error
-            );
-
-            return;
-        }
-
-        if (
-            !message ||
-            typeof message.type !== "string"
-        ) {
-            return;
-        }
-
-        if (
-            message.type === "joined" ||
-            message.type === "peer-joined" ||
-            message.type === "peer-left"
-        ) {
-            this.statusSnapshot = {
-                ...this.statusSnapshot,
-
-                status:
-                    this.connected
-                        ? "ONLINE"
-                        : this.statusSnapshot.status,
-
-                connected:
-                    this.connected,
-
-                peerCount:
-                    Number(
-                        message.peerCount ??
-                        this.statusSnapshot.peerCount ??
-                        0
-                    ),
-
-                url:
-                    this.signalingUrl,
-
-                error:
-                    null,
-            };
-
-            this.onStatus?.(
-                this.statusSnapshot
-            );
-        }
-
-        try {
-            this.onMessage?.(
-                message
-            );
-        } catch (error) {
-            console.error(
-                "NovaChain network message handler failed:",
+                "NovaChain received invalid network message:",
                 error
             );
         }
@@ -325,22 +635,27 @@ export class RelayNetwork {
         const delay =
             Math.min(
                 10_000,
+
                 500 *
                     2 **
                         Math.min(
                             this.reconnectAttempt -
                                 1,
+
                             5
                         )
             );
 
         this.reconnectTimer =
-            setTimeout(() => {
-                this.reconnectTimer =
-                    null;
+            setTimeout(
+                () => {
+                    this.reconnectTimer =
+                        null;
 
-                this.connect();
-            }, delay);
+                    this.connect();
+                },
+                delay
+            );
     }
 
     setStatus(
@@ -348,7 +663,8 @@ export class RelayNetwork {
         error = null
     ) {
         this.statusSnapshot = {
-            ...this.statusSnapshot,
+            ...this
+                .statusSnapshot,
 
             status,
 
@@ -368,16 +684,9 @@ export class RelayNetwork {
 }
 
 export function getDefaultSignalingUrl() {
-    if (
-        typeof import.meta !==
-            "undefined" &&
-        import.meta.env?.VITE_NOVACHAIN_SIGNALING_URL
-    ) {
-        return (
-            import.meta.env
-                .VITE_NOVACHAIN_SIGNALING_URL
-        );
-    }
-
-    return DEFAULT_SIGNALING_URL;
+    return (
+        import.meta.env
+            ?.VITE_NOVACHAIN_SIGNALING_URL ??
+        DEFAULT_SIGNALING_URL
+    );
 }

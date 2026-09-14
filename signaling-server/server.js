@@ -1,29 +1,29 @@
-import { WebSocketServer } from "ws";
+import {
+    WebSocketServer,
+} from "ws";
 
-const PORT = Number(
-    process.env.PORT ?? 8787
-);
+const PORT =
+    Number(
+        process.env.PORT ??
+            8787
+    );
 
 const wss =
     new WebSocketServer({
-        port: PORT,
+        port:
+            PORT,
     });
 
-/*
- * Connected NovaChain peers.
- *
- * This map contains only live connection
- * metadata. It does NOT contain blockchain
- * state or transaction history.
- */
-const peers = new Map();
+const peers =
+    new Map();
 
 function safeSend(
     socket,
     payload
 ) {
     if (
-        socket.readyState === 1
+        socket.readyState ===
+        1
     ) {
         try {
             socket.send(
@@ -31,9 +31,11 @@ function safeSend(
                     payload
                 )
             );
-        } catch (error) {
+        } catch (
+            error
+        ) {
             console.error(
-                "NovaChain relay send failed:",
+                "NovaChain relay send error:",
                 error
             );
         }
@@ -42,15 +44,15 @@ function safeSend(
 
 function broadcast(
     payload,
-    exceptSocket = null
+    exceptNodeId = null
 ) {
     for (
         const peer
         of peers.values()
     ) {
         if (
-            peer.socket ===
-            exceptSocket
+            peer.nodeId ===
+            exceptNodeId
         ) {
             continue;
         }
@@ -62,10 +64,32 @@ function broadcast(
     }
 }
 
+function directSend(
+    nodeId,
+    payload
+) {
+    const peer =
+        peers.get(
+            nodeId
+        );
+
+    if (!peer) {
+        return false;
+    }
+
+    safeSend(
+        peer.socket,
+        payload
+    );
+
+    return true;
+}
+
 wss.on(
     "connection",
     (socket) => {
-        let peerRecord = null;
+        let peer =
+            null;
 
         socket.on(
             "message",
@@ -85,7 +109,7 @@ wss.on(
                                 "error",
 
                             error:
-                                "Invalid JSON message.",
+                                "Invalid JSON.",
                         }
                     );
 
@@ -101,10 +125,11 @@ wss.on(
                 }
 
                 /*
-                 * JOIN
-                 *
-                 * Register this browser node.
-                 */
+                ----------------------------------------------------------
+                JOIN
+                ----------------------------------------------------------
+                */
+
                 if (
                     message.type ===
                     "join"
@@ -112,16 +137,28 @@ wss.on(
                     const nodeId =
                         typeof message.nodeId ===
                             "string" &&
-                        message.nodeId.length >
-                            0
-                            ? message.nodeId
-                            : `anonymous-${Date.now()}-${Math.random()}`;
+                        message.nodeId.trim()
+                            .length > 0
+                            ? message.nodeId.trim()
+                            : null;
 
-                    /*
-                     * Prevent duplicate live
-                     * connections using the same
-                     * persistent node identity.
-                     */
+                    if (!nodeId) {
+                        safeSend(
+                            socket,
+                            {
+                                type:
+                                    "error",
+
+                                error:
+                                    "nodeId is required.",
+                            }
+                        );
+
+                        socket.close();
+
+                        return;
+                    }
+
                     if (
                         peers.has(
                             nodeId
@@ -143,11 +180,12 @@ wss.on(
                         return;
                     }
 
-                    peerRecord = {
+                    peer = {
                         nodeId,
 
                         walletAddress:
-                            message.walletAddress ??
+                            message
+                                .walletAddress ??
                             null,
 
                         network:
@@ -156,20 +194,22 @@ wss.on(
 
                         protocol:
                             message.protocol ??
-                            "NCCP-0.1",
+                            "NCCP-0.2",
 
                         socket,
                     };
 
                     peers.set(
                         nodeId,
-                        peerRecord
+                        peer
                     );
 
-                    /*
-                     * Confirm join to
-                     * the newly connected node.
-                     */
+                    const peerCount =
+                        Math.max(
+                            0,
+                            peers.size - 1
+                        );
+
                     safeSend(
                         socket,
                         {
@@ -178,14 +218,13 @@ wss.on(
 
                             nodeId,
 
-                            network:
-                                peerRecord.network,
+                            peerCount,
 
-                            peerCount:
-                                peers.size,
+                            network:
+                                peer.network,
 
                             protocol:
-                                "NCCP-0.1",
+                                "NCCP-0.2",
 
                             timestamp:
                                 Date.now(),
@@ -193,11 +232,13 @@ wss.on(
                     );
 
                     /*
-                     * Tell existing peers
-                     * that a new peer exists.
+                     * Inform existing peers,
+                     * but do not force them to
+                     * broadcast their whole
+                     * blockchain.
                      *
-                     * The new peer is excluded
-                     * from this message.
+                     * The new node will request
+                     * state explicitly.
                      */
                     broadcast(
                         {
@@ -208,23 +249,18 @@ wss.on(
                                 nodeId,
 
                                 walletAddress:
-                                    peerRecord.walletAddress,
+                                    peer.walletAddress,
                             },
 
-                            peerCount:
-                                peers.size,
+                            peerCount,
                         },
-                        socket
+                        nodeId
                     );
 
                     return;
                 }
 
-                /*
-                 * Everything else requires
-                 * an authenticated live join.
-                 */
-                if (!peerRecord) {
+                if (!peer) {
                     safeSend(
                         socket,
                         {
@@ -232,7 +268,7 @@ wss.on(
                                 "error",
 
                             error:
-                                "Join the NovaChain network first.",
+                                "Join required first.",
                         }
                     );
 
@@ -240,27 +276,64 @@ wss.on(
                 }
 
                 /*
-                 * Relay-only behavior.
+                ----------------------------------------------------------
+                Message forwarding
+                ----------------------------------------------------------
+                */
+
+                const forwarded = {
+                    ...message,
+
+                    /*
+                     * Never trust a client-supplied
+                     * sender ID.
+                     */
+                    senderNodeId:
+                        peer.nodeId,
+
+                    peerCount:
+                        Math.max(
+                            0,
+                            peers.size - 1
+                        ),
+
+                    forwardedAt:
+                        Date.now(),
+                };
+
+                /*
+                 * Targeted message.
                  *
-                 * The server does not:
+                 * Used primarily for state-response.
+                 */
+                if (
+                    typeof message
+                        .recipientNodeId ===
+                        "string" &&
+                    message
+                        .recipientNodeId
+                        .trim()
+                        .length > 0
+                ) {
+                    directSend(
+                        message
+                            .recipientNodeId,
+
+                        forwarded
+                    );
+
+                    return;
+                }
+
+                /*
+                 * Normal broadcast:
                  *
-                 * - mine
-                 * - validate the chain
-                 * - modify UTXOs
-                 * - store blockchain data
-                 * - own the ledger
-                 *
-                 * It simply forwards NCCP
-                 * messages to current peers.
+                 * transaction
+                 * block
                  */
                 broadcast(
-                    {
-                        ...message,
-
-                        forwardedAt:
-                            Date.now(),
-                    },
-                    socket
+                    forwarded,
+                    peer.nodeId
                 );
             }
         );
@@ -268,12 +341,12 @@ wss.on(
         socket.on(
             "close",
             () => {
-                if (!peerRecord) {
+                if (!peer) {
                     return;
                 }
 
                 peers.delete(
-                    peerRecord.nodeId
+                    peer.nodeId
                 );
 
                 broadcast({
@@ -281,10 +354,13 @@ wss.on(
                         "peer-left",
 
                     nodeId:
-                        peerRecord.nodeId,
+                        peer.nodeId,
 
                     peerCount:
-                        peers.size,
+                        Math.max(
+                            0,
+                            peers.size - 1
+                        ),
                 });
             }
         );

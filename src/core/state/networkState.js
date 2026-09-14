@@ -8,7 +8,9 @@ import {
     signTransaction,
 } from "../transaction/transaction.js";
 
-import { validateTransaction } from "../transaction/validator.js";
+import {
+    validateTransaction,
+} from "../transaction/validator.js";
 
 import {
     applyTransactionsToUTXOSet,
@@ -19,12 +21,22 @@ import {
 import { createBlock } from "../block/block.js";
 import { mineBlock } from "../mining/proofofWork.js";
 
+import {
+    PROTOCOL,
+    calculateBlockWork,
+    calculateChainWork,
+    chainWorkToString,
+    compareChains,
+    getBlockReward,
+    getNextDifficulty,
+} from "../consensus/protocol.js";
+
 /*
 |--------------------------------------------------------------------------
 | NovaChain Network State
 |--------------------------------------------------------------------------
 |
-| Coordinates:
+| Authoritative local runtime:
 |
 | Wallet
 |   ↓
@@ -32,24 +44,33 @@ import { mineBlock } from "../mining/proofofWork.js";
 |   ↓
 | Mempool
 |   ↓
-| Mining
+| Block Builder
 |   ↓
-| Block
+| Proof of Work
 |   ↓
-| UTXO Set
+| Blockchain
+|   ↓
+| UTXO reconstruction
 |
-| Network transport is attached separately.
-| The relay carries NCCP messages only.
+| Core invariant:
+|
+|     BLOCKCHAIN -> VALIDATED STATE -> UTXO SET
+|
+| The blockchain is the source of truth.
+| The UTXO set is derived state.
 |--------------------------------------------------------------------------
 */
 
-const MINING_REWARD = 50_000;
+const DB_NAME =
+    "novachain-ledger";
 
-const DB_NAME = "novachain-ledger";
-const DB_VERSION = 1;
-const STORE_NAME = "network";
+const DB_VERSION = 2;
 
-const STATE_KEY = "local-state";
+const STORE_NAME =
+    "network";
+
+const STATE_KEY =
+    "local-state";
 
 export class NetworkState {
     constructor() {
@@ -61,25 +82,15 @@ export class NetworkState {
 
         this.utxos = [];
 
-        this.initialized = false;
-        this.isMining = false;
+        this.initialized =
+            false;
 
-        /*
-         * Live NCCP transport.
-         *
-         * The transport is responsible for
-         * moving messages between browser nodes.
-         *
-         * It does NOT own ledger state.
-         */
+        this.isMining =
+            false;
+
         this.networkTransport =
             null;
 
-        /*
-         * Remote transactions that arrived
-         * before the node had the UTXOs required
-         * to validate them.
-         */
         this.pendingRemoteTransactions =
             [];
 
@@ -89,27 +100,34 @@ export class NetworkState {
     }
 
     async initialize() {
-        if (this.initialized) {
+        if (
+            this.initialized
+        ) {
             return this;
         }
 
-        await this.blockchain.initialize();
+        await this.blockchain
+            .initialize();
 
         const restored =
             await this.restoreState();
 
-        if (!restored) {
+        if (
+            !restored
+        ) {
+            this.utxos = [];
+
+            this.mempool.clear();
+
             await this.persistState();
         }
 
-        this.initialized = true;
+        this.initialized =
+            true;
 
         return this;
     }
 
-    /*
-     * Attach the browser network transport.
-     */
     attachNetworkTransport(
         transport
     ) {
@@ -120,9 +138,6 @@ export class NetworkState {
         return this;
     }
 
-    /*
-     * Current network status for UI/debugging.
-     */
     getNetworkStatus() {
         const status =
             this.networkTransport
@@ -178,18 +193,276 @@ export class NetworkState {
             .getTransactions();
     }
 
-    getBalance(address) {
+    getBalance(
+        address
+    ) {
         return getBalance(
             this.utxos,
             address
         );
     }
 
+    getChainWork() {
+        return calculateChainWork(
+            this.getChain()
+        );
+    }
+
+    getChainWorkString() {
+        return chainWorkToString(
+            this.getChain()
+        );
+    }
+
+    getNextDifficulty() {
+        return getNextDifficulty(
+            this.getChain()
+        );
+    }
+
+    getCurrentBlockReward() {
+        const latest =
+            this.getLatestBlock();
+
+        return getBlockReward(
+            (latest?.index ?? 0) + 1
+        );
+    }
+
     /*
-     * Return only UTXOs that have not
-     * already been consumed by pending
-     * mempool transactions.
-     */
+    |--------------------------------------------------------------------------
+    | Dashboard / UI Snapshot API
+    |--------------------------------------------------------------------------
+    |
+    | This method is intentionally kept as a stable public API.
+    |
+    | dashboard.js calls:
+    |
+    |     networkState.getStateSnapshot()
+    |
+    | Therefore all runtime changes must preserve this method.
+    |--------------------------------------------------------------------------
+    */
+
+    getStateSnapshot() {
+        const chain =
+            this.getChain();
+
+        const latestBlock =
+            chain.length > 0
+                ? chain[
+                    chain.length - 1
+                ]
+                : null;
+
+        const miningInfo =
+            this.getMiningInfo();
+
+        return {
+            initialized:
+                this.initialized,
+
+            chainHeight:
+                latestBlock?.index ??
+                0,
+
+            blocks:
+                chain,
+
+            utxos:
+                this.getUTXOs(),
+
+            mempool:
+                this.getMempoolTransactions(),
+
+            isMining:
+                this.isMining,
+
+            network:
+                this.getNetworkStatus(),
+
+            /*
+             * Additional hardened
+             * blockchain telemetry.
+             */
+            difficulty:
+                latestBlock?.difficulty ??
+                0,
+
+            nextDifficulty:
+                miningInfo
+                    .nextDifficulty,
+
+            miningReward:
+                miningInfo
+                    .nextReward,
+
+            chainWork:
+                this.getChainWorkString(),
+
+            nextBlockHeight:
+                miningInfo
+                    .nextHeight,
+
+            miningEligible:
+                miningInfo
+                    .canMine,
+
+            miningReason:
+                miningInfo
+                    .reason,
+
+            protocol: {
+                version:
+                    PROTOCOL.version,
+
+                networkId:
+                    PROTOCOL.networkId,
+
+                targetBlockTimeMs:
+                    PROTOCOL
+                        .targetBlockTimeMs,
+
+                difficultyAdjustmentInterval:
+                    PROTOCOL
+                        .difficultyAdjustmentInterval,
+
+                minDifficulty:
+                    PROTOCOL
+                        .minDifficulty,
+
+                maxDifficulty:
+                    PROTOCOL
+                        .maxDifficulty,
+
+                maxTransactionsPerBlock:
+                    PROTOCOL
+                        .maxTransactionsPerBlock,
+            },
+        };
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Mining Eligibility
+    |--------------------------------------------------------------------------
+    */
+
+    canMine() {
+        const height =
+            this.getLatestBlock()
+                ?.index ?? 0;
+
+        /*
+         * First block:
+         *
+         * Creates the first spendable
+         * balance.
+         */
+        if (
+            height === 0
+        ) {
+            return {
+                allowed:
+                    true,
+
+                reason:
+                    "CREATE_INITIAL_BLOCK",
+            };
+        }
+
+        /*
+         * After initial funding,
+         * only mine when there is
+         * actual payment work.
+         */
+        if (
+            this.mempool.size > 0
+        ) {
+            return {
+                allowed:
+                    true,
+
+                reason:
+                    "PENDING_TRANSACTIONS",
+            };
+        }
+
+        return {
+            allowed:
+                false,
+
+            reason:
+                "NO_PENDING_WORK",
+        };
+    }
+
+    getMiningInfo() {
+        const nextHeight =
+            (
+                this.getLatestBlock()
+                    ?.index ?? 0
+            ) + 1;
+
+        const nextDifficulty =
+            this.getNextDifficulty();
+
+        const reward =
+            getBlockReward(
+                nextHeight
+            );
+
+        const eligibility =
+            this.canMine();
+
+        return {
+            nextHeight,
+
+            nextDifficulty,
+
+            nextReward:
+                reward,
+
+            rewardUnit:
+                "NNC",
+
+            maxTransactions:
+                PROTOCOL
+                    .maxTransactionsPerBlock,
+
+            targetBlockTimeMs:
+                PROTOCOL
+                    .targetBlockTimeMs,
+
+            adjustmentInterval:
+                PROTOCOL
+                    .difficultyAdjustmentInterval,
+
+            minDifficulty:
+                PROTOCOL
+                    .minDifficulty,
+
+            maxDifficulty:
+                PROTOCOL
+                    .maxDifficulty,
+
+            chainWork:
+                this.getChainWorkString(),
+
+            canMine:
+                eligibility.allowed,
+
+            reason:
+                eligibility.reason,
+        };
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Spendable UTXOs
+    |--------------------------------------------------------------------------
+    */
+
     getSpendableUTXOs(
         address
     ) {
@@ -203,7 +476,8 @@ export class NetworkState {
         ) {
             for (
                 const input
-                of transaction.inputs ?? []
+                of transaction.inputs ??
+                []
             ) {
                 pendingInputs.add(
                     `${input.transactionId}:${input.outputIndex}`
@@ -221,6 +495,12 @@ export class NetworkState {
         );
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Create Payment
+    |--------------------------------------------------------------------------
+    */
+
     async createPayment({
         wallet,
         recipientAddress,
@@ -228,7 +508,9 @@ export class NetworkState {
     }) {
         this.requireInitialized();
 
-        if (!wallet?.address) {
+        if (
+            !wallet?.address
+        ) {
             throw new Error(
                 "A valid wallet is required."
             );
@@ -243,6 +525,18 @@ export class NetworkState {
         ) {
             throw new Error(
                 "A valid recipient address is required."
+            );
+        }
+
+        const recipient =
+            recipientAddress.trim();
+
+        if (
+            recipient ===
+            wallet.address
+        ) {
+            throw new Error(
+                "Sending to the same wallet is not allowed in the demo runtime."
             );
         }
 
@@ -272,6 +566,18 @@ export class NetworkState {
         const selectedUTXOs =
             selection.selected;
 
+        if (
+            !Array.isArray(
+                selectedUTXOs
+            ) ||
+            selectedUTXOs.length ===
+                0
+        ) {
+            throw new Error(
+                "Insufficient spendable balance."
+            );
+        }
+
         const change =
             selection.change;
 
@@ -289,13 +595,15 @@ export class NetworkState {
         const outputs = [
             {
                 address:
-                    recipientAddress.trim(),
+                    recipient,
 
                 amount,
             },
         ];
 
-        if (change > 0) {
+        if (
+            change > 0
+        ) {
             outputs.push({
                 address:
                     wallet.address,
@@ -323,50 +631,17 @@ export class NetworkState {
                 this.utxos
             );
 
-        if (!valid) {
+        if (
+            !valid
+        ) {
             throw new Error(
                 "Transaction validation failed."
             );
         }
 
-        /*
-         * Final mempool double-spend check.
-         */
-        const pendingInputs =
-            new Set();
-
-        for (
-            const pending
-            of this.mempool
-                .getTransactions()
-        ) {
-            for (
-                const input
-                of pending.inputs ?? []
-            ) {
-                pendingInputs.add(
-                    `${input.transactionId}:${input.outputIndex}`
-                );
-            }
-        }
-
-        for (
-            const input
-            of transaction.inputs
-        ) {
-            const key =
-                `${input.transactionId}:${input.outputIndex}`;
-
-            if (
-                pendingInputs.has(
-                    key
-                )
-            ) {
-                throw new Error(
-                    "One or more selected UTXOs are already pending in the mempool."
-                );
-            }
-        }
+        this.assertNoPendingDoubleSpend(
+            transaction
+        );
 
         this.mempool.add(
             transaction
@@ -374,43 +649,30 @@ export class NetworkState {
 
         await this.persistState();
 
-        /*
-         * THIS is the new network step.
-         *
-         * Browser A:
-         *
-         * local mempool
-         *      +
-         * NCCP broadcast
-         *
-         * Other nodes receive the transaction.
-         */
         this.networkTransport
             ?.broadcastTransaction(
                 transaction
             );
 
         return transaction;
-    }    /*
-     * Mine a new block.
-     *
-     * Empty mempool is allowed.
-     *
-     * A miner can therefore create:
-     *
-     *   coinbase-only block
-     *
-     * and receive the protocol reward.
-     */
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Mine Pending Transactions
+    |--------------------------------------------------------------------------
+    */
+
     async minePendingTransactions({
         minerAddress,
-        difficulty = 3,
         onProgress,
         signal,
     }) {
         this.requireInitialized();
 
-        if (this.isMining) {
+        if (
+            this.isMining
+        ) {
             throw new Error(
                 "Mining is already in progress."
             );
@@ -421,39 +683,66 @@ export class NetworkState {
                 "string" ||
             minerAddress
                 .trim()
-                .length === 0
+                .length ===
+                0
         ) {
             throw new Error(
                 "A valid miner address is required."
             );
         }
 
+        const eligibility =
+            this.canMine();
+
         if (
-            !Number.isInteger(
-                difficulty
-            ) ||
-            difficulty < 0 ||
-            difficulty > 64
+            !eligibility.allowed
         ) {
             throw new Error(
-                "Invalid mining difficulty."
+                "No pending blockchain work. Submit a transaction before mining another block."
             );
         }
 
-        this.isMining = true;
+        /*
+         * Consensus decides difficulty.
+         */
+        const difficulty =
+            this.getNextDifficulty();
+
+        const nextHeight =
+            this.getLatestBlock()
+                .index + 1;
+
+        const reward =
+            getBlockReward(
+                nextHeight
+            );
+
+        if (
+            reward <= 0
+        ) {
+            throw new Error(
+                "Mining reward has reached zero under the current issuance schedule."
+            );
+        }
+
+        this.isMining =
+            true;
+
+        const parentHash =
+            this.getLatestBlock()
+                .hash;
 
         try {
             const pendingTransactions =
-                this.mempool
-                    .getTransactions();
+                await this
+                    .getValidPendingTransactionsForBlock();
 
             const coinbase =
                 createCoinbaseTransaction({
                     minerAddress:
                         minerAddress.trim(),
 
-                    reward:
-                        MINING_REWARD,
+                    reward,
                 });
 
             await finalizeCoinbaseTransaction(
@@ -465,17 +754,38 @@ export class NetworkState {
                 ...pendingTransactions,
             ];
 
-            const latestBlock =
+            if (
+                transactions.length >
+                PROTOCOL
+                    .maxTransactionsPerBlock
+            ) {
+                throw new Error(
+                    "The block would exceed the protocol transaction limit."
+                );
+            }
+
+            const currentParent =
                 this.getLatestBlock();
+
+            if (
+                currentParent.hash !==
+                parentHash
+            ) {
+                this.networkTransport
+                    ?.requestState();
+
+                throw new Error(
+                    "Mining target changed before Proof of Work started."
+                );
+            }
 
             const block =
                 await createBlock({
                     index:
-                        latestBlock.index +
-                        1,
+                        nextHeight,
 
                     previousHash:
-                        latestBlock.hash,
+                        currentParent.hash,
 
                     transactions,
 
@@ -490,16 +800,35 @@ export class NetworkState {
                 }
             );
 
+            /*
+             * Another node may have produced
+             * a block while this browser mined.
+             */
+            if (
+                this.getLatestBlock()
+                    .hash !==
+                parentHash
+            ) {
+                this.networkTransport
+                    ?.requestState();
+
+                throw new Error(
+                    "Mined block became stale because another chain update arrived first."
+                );
+            }
+
             const validBlock =
                 await this.blockchain
                     .addBlock(
                         block
                     );
 
+            /*
+             * Rebuild authoritative UTXO state.
+             */
             this.utxos =
-                applyTransactionsToUTXOSet(
-                    this.utxos,
-                    transactions
+                await this.rebuildUTXOSet(
+                    this.getChain()
                 );
 
             this.mempool
@@ -507,15 +836,11 @@ export class NetworkState {
                     pendingTransactions
                 );
 
+            await this
+                .removeConflictingMempoolTransactions();
+
             await this.persistState();
 
-            /*
-             * NEW NETWORK STEP:
-             *
-             * Once the local block is fully
-             * validated and committed,
-             * broadcast it to the other nodes.
-             */
             this.networkTransport
                 ?.broadcastBlock(
                     validBlock
@@ -523,117 +848,109 @@ export class NetworkState {
 
             return validBlock;
         } finally {
-            this.isMining = false;
+            this.isMining =
+                false;
         }
     }
 
     /*
-     * Add a block received from another node.
-     */
+    |--------------------------------------------------------------------------
+    | Incoming Block
+    |--------------------------------------------------------------------------
+    */
+
     async addExternalBlock(
         block
     ) {
         this.requireInitialized();
 
-        if (!block) {
+        if (
+            !block ||
+            typeof block !==
+                "object"
+        ) {
             return false;
         }
 
         const latest =
             this.getLatestBlock();
 
-        /*
-         * Already have this block.
-         */
         if (
-            block.index <=
-            latest.index
-        ) {
-            return false;
-        }
-
-        /*
-         * We only directly accept the exact
-         * next block in the current MVP.
-         *
-         * If there is a gap, request the
-         * longer state from peers.
-         */
-        if (
-            block.index !==
-                latest.index + 1 ||
-            block.previousHash !==
+            block.index ===
+                latest.index + 1 &&
+            block.previousHash ===
                 latest.hash
         ) {
-            this.networkTransport
-                ?.requestState();
+            const previousChain =
+                this.getChain();
 
-            return false;
-        }
+            try {
+                const validBlock =
+                    await this.blockchain
+                        .addBlock(
+                            block
+                        );
 
-        let validBlock;
-
-        try {
-            validBlock =
-                await this.blockchain
-                    .addBlock(
-                        block
-                    );
-        } catch (error) {
-            /*
-             * Do not let malformed/foreign
-             * network data break the node.
-             */
-            console.warn(
-                "NovaChain rejected external block.",
-                error
-            );
-
-            return false;
-        }
-
-        try {
-            this.utxos =
-                applyTransactionsToUTXOSet(
-                    this.utxos,
-                    block.transactions
+                await this.validateChain(
+                    this.getChain()
                 );
-        } catch (error) {
-            console.error(
-                "NovaChain failed to apply external block UTXOs.",
-                error
-            );
 
-            return false;
+                this.utxos =
+                    await this.rebuildUTXOSet(
+                        this.getChain()
+                    );
+
+                const included =
+                    block.transactions
+                        ?.filter(
+                            (transaction) =>
+                                transaction
+                                    ?.type !==
+                                "coinbase"
+                        ) ??
+                    [];
+
+                this.mempool
+                    .removeTransactions(
+                        included
+                    );
+
+                await this
+                    .removeConflictingMempoolTransactions();
+
+                await this.persistState();
+
+                return validBlock;
+            } catch (
+                error
+            ) {
+                this.blockchain.chain =
+                    previousChain;
+
+                console.warn(
+                    "NovaChain rejected external block:",
+                    error
+                );
+
+                this.networkTransport
+                    ?.requestState();
+
+                return false;
+            }
         }
 
-        const regularTransactions =
-            block.transactions.filter(
-                (transaction) =>
-                    transaction.type !==
-                    "coinbase"
-            );
+        this.networkTransport
+            ?.requestState();
 
-        this.mempool
-            .removeTransactions(
-                regularTransactions
-            );
-
-        await this.persistState();
-
-        /*
-         * A block received from a peer
-         * is NOT rebroadcast here.
-         *
-         * The relay already propagated it.
-         */
-        return validBlock;
+        return false;
     }
 
     /*
-     * Receive a payment transaction from
-     * another browser node.
-     */
+    |--------------------------------------------------------------------------
+    | Remote Transaction
+    |--------------------------------------------------------------------------
+    */
+
     async receiveRemoteTransaction(
         transaction
     ) {
@@ -645,10 +962,6 @@ export class NetworkState {
             return false;
         }
 
-        /*
-         * Ignore transactions we
-         * already know.
-         */
         if (
             this.mempool.has(
                 transaction.id
@@ -657,36 +970,42 @@ export class NetworkState {
             return false;
         }
 
-        /*
-         * Validate against our local UTXO set.
-         */
-        const valid =
-            await validateTransaction(
-                transaction,
-                this.utxos
+        const alreadyConfirmed =
+            this.getChain().some(
+                (block) =>
+                    block.transactions?.some(
+                        (candidate) =>
+                            candidate?.id ===
+                            transaction.id
+                    )
             );
 
-        if (!valid) {
-            /*
-             * The sender may have a longer chain
-             * than this node.
-             *
-             * Ask peers for current state.
-             */
-            const exists =
-                this.pendingRemoteTransactions
-                    .some(
-                        (pending) =>
-                            pending.id ===
-                            transaction.id
-                    );
+        if (
+            alreadyConfirmed
+        ) {
+            return false;
+        }
 
-            if (!exists) {
-                this.pendingRemoteTransactions
-                    .push(
-                        transaction
-                    );
-            }
+        let valid =
+            false;
+
+        try {
+            valid =
+                await validateTransaction(
+                    transaction,
+                    this.utxos
+                );
+        } catch {
+            valid =
+                false;
+        }
+
+        if (
+            !valid
+        ) {
+            this.queueRemoteTransaction(
+                transaction
+            );
 
             this.networkTransport
                 ?.requestState();
@@ -694,41 +1013,12 @@ export class NetworkState {
             return false;
         }
 
-        /*
-         * Extra pending-spend protection.
-         */
-        const pendingInputs =
-            new Set();
-
-        for (
-            const pending
-            of this.mempool
-                .getTransactions()
-        ) {
-            for (
-                const input
-                of pending.inputs ?? []
-            ) {
-                pendingInputs.add(
-                    `${input.transactionId}:${input.outputIndex}`
-                );
-            }
-        }
-
-        for (
-            const input
-            of transaction.inputs ?? []
-        ) {
-            const key =
-                `${input.transactionId}:${input.outputIndex}`;
-
-            if (
-                pendingInputs.has(
-                    key
-                )
-            ) {
-                return false;
-            }
+        try {
+            this.assertNoPendingDoubleSpend(
+                transaction
+            );
+        } catch {
+            return false;
         }
 
         this.mempool.add(
@@ -737,30 +1027,15 @@ export class NetworkState {
 
         await this.persistState();
 
-        /*
-         * IMPORTANT:
-         *
-         * We intentionally DO NOT broadcast
-         * the transaction again.
-         *
-         * The relay already forwards it to
-         * every current peer.
-         *
-         * This prevents a broadcast loop.
-         */
         return true;
     }
 
     /*
-     * Adopt a newer peer state.
-     *
-     * Current MVP synchronization trusts
-     * the peer's UTXO snapshot after the
-     * blockchain itself is validated.
-     *
-     * Later we can deterministically
-     * rebuild UTXOs from the chain.
-     */
+    |--------------------------------------------------------------------------
+    | Remote State
+    |--------------------------------------------------------------------------
+    */
+
     async adoptRemoteState(
         state
     ) {
@@ -771,98 +1046,78 @@ export class NetworkState {
             !Array.isArray(
                 state.blocks
             ) ||
-            !state.blocks.length
+            state.blocks.length ===
+                0
         ) {
             return false;
         }
 
-        const remoteHeight =
-            state.blocks.length - 1;
+        const candidateChain =
+            state.blocks.map(
+                (block) =>
+                    typeof structuredClone ===
+                    "function"
+                        ? structuredClone(
+                            block
+                        )
+                        : JSON.parse(
+                            JSON.stringify(
+                                block
+                            )
+                        )
+            );
 
-        const localHeight =
-            this.blockchain
-                .chain.length - 1;
+        const localChain =
+            this.getChain();
 
-        /*
-         * Never replace an equal/shorter chain.
-         */
         if (
-            remoteHeight <=
-            localHeight
+            compareChains(
+                localChain,
+                candidateChain
+            ) <= 0
         ) {
             return false;
         }
 
         const previousChain =
-            this.blockchain.chain;
-
-        this.blockchain.chain = [
-            ...state.blocks,
-        ];
+            this.getChain();
 
         try {
-            const chainValid =
-                await this.blockchain
-                    .isValid();
+            await this.validateChain(
+                candidateChain
+            );
 
-            if (!chainValid) {
-                this.blockchain.chain =
-                    previousChain;
+            this.blockchain.chain =
+                candidateChain;
 
-                return false;
-            }
-
-            if (
-                !Array.isArray(
-                    state.utxos
-                )
-            ) {
-                this.blockchain.chain =
-                    previousChain;
-
-                return false;
-            }
-
-            /*
-             * Replace local state with
-             * the validated longer chain.
-             */
-            this.utxos = [
-                ...state.utxos,
-            ];
+            this.utxos =
+                await this.rebuildUTXOSet(
+                    candidateChain
+                );
 
             this.mempool.clear();
 
-            if (
-                Array.isArray(
-                    state.mempool
-                )
-            ) {
-                for (
-                    const transaction
-                    of state.mempool
-                ) {
-                    if (
-                        transaction?.id
-                    ) {
-                        this.mempool.add(
-                            transaction
-                        );
-                    }
-                }
-            }
+            await this.restoreValidMempool(
+                state.mempool
+            );
+
+            await this
+                .removeConflictingMempoolTransactions();
 
             await this.persistState();
 
-            await this.retryPendingRemoteTransactions();
+            await this
+                .retryPendingRemoteTransactions();
 
             return true;
-        } catch (error) {
+        } catch (
+            error
+        ) {
             this.blockchain.chain =
                 previousChain;
 
             console.warn(
-                "NovaChain remote state adoption failed.",
+                "NovaChain remote state rejected:",
                 error
             );
 
@@ -890,17 +1145,26 @@ export class NetworkState {
             of queued
         ) {
             try {
-                await this.receiveRemoteTransaction(
-                    transaction
-                );
-            } catch (error) {
+                await this
+                    .receiveRemoteTransaction(
+                        transaction
+                    );
+            } catch (
+                error
+            ) {
                 console.warn(
-                    "NovaChain queued transaction could not be applied.",
+                    "NovaChain queued transaction could not be applied:",
                     error
                 );
             }
         }
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Mempool
+    |--------------------------------------------------------------------------
+    */
 
     clearMempool() {
         this.mempool.clear();
@@ -908,41 +1172,574 @@ export class NetworkState {
         void this.persistState();
     }
 
-    getStateSnapshot() {
-        return {
-            initialized:
-                this.initialized,
+    assertNoPendingDoubleSpend(
+        transaction
+    ) {
+        const pendingInputs =
+            new Set();
 
-            chainHeight:
-                this.blockchain
-                    .chain.length - 1,
+        for (
+            const pending
+            of this.mempool
+                .getTransactions()
+        ) {
+            for (
+                const input
+                of pending.inputs ??
+                []
+            ) {
+                pendingInputs.add(
+                    `${input.transactionId}:${input.outputIndex}`
+                );
+            }
+        }
 
-            blocks:
-                this.getChain(),
+        for (
+            const input
+            of transaction.inputs ??
+            []
+        ) {
+            const key =
+                `${input.transactionId}:${input.outputIndex}`;
 
-            utxos:
-                this.getUTXOs(),
-
-            mempool:
-                this.getMempoolTransactions(),
-
-            isMining:
-                this.isMining,
-
-            network:
-                this.getNetworkStatus(),
-        };
+            if (
+                pendingInputs.has(
+                    key
+                )
+            ) {
+                throw new Error(
+                    "One or more inputs are already reserved by the mempool."
+                );
+            }
+        }
     }
 
-    requireInitialized() {
+    async getValidPendingTransactionsForBlock() {
+        const pending =
+            this.mempool
+                .getTransactions();
+
+        const validTransactions =
+            [];
+
+        let workingUTXOs = [
+            ...this.utxos,
+        ];
+
+        for (
+            const transaction
+            of pending
+        ) {
+            if (
+                validTransactions.length >=
+                PROTOCOL
+                    .maxTransactionsPerBlock -
+                    1
+            ) {
+                break;
+            }
+
+            try {
+                const valid =
+                    await validateTransaction(
+                        transaction,
+                        workingUTXOs
+                    );
+
+                if (
+                    !valid
+                ) {
+                    continue;
+                }
+
+                workingUTXOs =
+                    applyTransactionsToUTXOSet(
+                        workingUTXOs,
+                        [transaction]
+                    );
+
+                validTransactions.push(
+                    transaction
+                );
+            } catch {
+                continue;
+            }
+        }
+
+        return validTransactions;
+    }
+
+    async restoreValidMempool(
+        persistedMempool
+    ) {
         if (
-            !this.initialized
+            !Array.isArray(
+                persistedMempool
+            )
+        ) {
+            return;
+        }
+
+        for (
+            const transaction
+            of persistedMempool
+        ) {
+            if (
+                !transaction?.id
+            ) {
+                continue;
+            }
+
+            const alreadyConfirmed =
+                this.getChain().some(
+                    (block) =>
+                        block.transactions?.some(
+                            (candidate) =>
+                                candidate?.id ===
+                                transaction.id
+                        )
+                );
+
+            if (
+                alreadyConfirmed
+            ) {
+                continue;
+            }
+
+            try {
+                const valid =
+                    await validateTransaction(
+                        transaction,
+                        this.utxos
+                    );
+
+                if (
+                    !valid
+                ) {
+                    continue;
+                }
+
+                this.assertNoPendingDoubleSpend(
+                    transaction
+                );
+
+                this.mempool.add(
+                    transaction
+                );
+            } catch {
+                /*
+                 * Drop invalid persisted
+                 * mempool entries.
+                 */
+            }
+        }
+    }
+
+    async removeConflictingMempoolTransactions() {
+        const transactions =
+            this.mempool
+                .getTransactions();
+
+        this.mempool.clear();
+
+        let workingUTXOs = [
+            ...this.utxos,
+        ];
+
+        for (
+            const transaction
+            of transactions
+        ) {
+            try {
+                const valid =
+                    await validateTransaction(
+                        transaction,
+                        workingUTXOs
+                    );
+
+                if (
+                    !valid
+                ) {
+                    continue;
+                }
+
+                this.assertNoPendingDoubleSpend(
+                    transaction
+                );
+
+                workingUTXOs =
+                    applyTransactionsToUTXOSet(
+                        workingUTXOs,
+                        [transaction]
+                    );
+
+                this.mempool.add(
+                    transaction
+                );
+            } catch {
+                /*
+                 * Drop stale/conflicting
+                 * transactions.
+                 */
+            }
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Chain Validation
+    |--------------------------------------------------------------------------
+    */
+
+    async validateChain(
+        chain
+    ) {
+        if (
+            !Array.isArray(
+                chain
+            ) ||
+            chain.length ===
+                0
         ) {
             throw new Error(
-                "Network state is not initialized."
+                "Candidate chain is empty."
+            );
+        }
+
+        const previousChain =
+            this.blockchain.chain;
+
+        try {
+            this.blockchain.chain =
+                chain;
+
+            const structureValid =
+                await this.blockchain
+                    .isValid();
+
+            if (
+                !structureValid
+            ) {
+                throw new Error(
+                    "Candidate blockchain failed structural validation."
+                );
+            }
+
+            this.validateChainDifficulty(
+                chain
+            );
+
+            this.validateTimestampOrder(
+                chain
+            );
+
+            await this.rebuildUTXOSet(
+                chain
+            );
+        } finally {
+            this.blockchain.chain =
+                previousChain;
+        }
+
+        return true;
+    }
+
+    validateChainDifficulty(
+        chain
+    ) {
+        for (
+            let index = 1;
+            index < chain.length;
+            index += 1
+        ) {
+            const previousChain =
+                chain.slice(
+                    0,
+                    index
+                );
+
+            const expected =
+                getNextDifficulty(
+                    previousChain
+                );
+
+            const actual =
+                Number(
+                    chain[index]
+                        ?.difficulty
+                );
+
+            if (
+                actual !==
+                expected
+            ) {
+                throw new Error(
+                    `Block #${
+                        chain[index]?.index ??
+                        index
+                    } has difficulty ${actual}; expected ${expected}.`
+                );
+            }
+        }
+    }
+
+    validateTimestampOrder(
+        chain
+    ) {
+        for (
+            let index = 1;
+            index < chain.length;
+            index += 1
+        ) {
+            const previous =
+                Number(
+                    chain[index - 1]
+                        ?.timestamp
+                );
+
+            const current =
+                Number(
+                    chain[index]
+                        ?.timestamp
+                );
+
+            if (
+                !Number.isFinite(
+                    previous
+                ) ||
+                !Number.isFinite(
+                    current
+                ) ||
+                current <
+                previous
+            ) {
+                throw new Error(
+                    `Block #${
+                        chain[index]?.index ??
+                        index
+                    } timestamp is earlier than its parent.`
+                );
+            }
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Deterministic UTXO Reconstruction
+    |--------------------------------------------------------------------------
+    */
+
+    async rebuildUTXOSet(
+        chain
+    ) {
+        if (
+            !Array.isArray(
+                chain
+            ) ||
+            chain.length ===
+                0
+        ) {
+            throw new Error(
+                "Cannot rebuild UTXO state from an empty chain."
+            );
+        }
+
+        let rebuilt = [];
+
+        for (
+            let blockIndex = 0;
+            blockIndex < chain.length;
+            blockIndex += 1
+        ) {
+            const block =
+                chain[blockIndex];
+
+            if (
+                !Array.isArray(
+                    block.transactions
+                )
+            ) {
+                throw new Error(
+                    `Block #${block.index} has no transaction array.`
+                );
+            }
+
+            /*
+             * Genesis remains non-spendable.
+             */
+            if (
+                blockIndex === 0
+            ) {
+                continue;
+            }
+
+            const coinbaseTransactions =
+                block.transactions.filter(
+                    (transaction) =>
+                        transaction
+                            ?.type ===
+                        "coinbase"
+                );
+
+            if (
+                coinbaseTransactions.length !==
+                1
+            ) {
+                throw new Error(
+                    `Block #${block.index} must contain exactly one coinbase transaction.`
+                );
+            }
+
+            if (
+                block.transactions[0]
+                    ?.type !==
+                "coinbase"
+            ) {
+                throw new Error(
+                    `Block #${block.index} coinbase must be the first transaction.`
+                );
+            }
+
+            if (
+                block.transactions.length >
+                PROTOCOL
+                    .maxTransactionsPerBlock
+            ) {
+                throw new Error(
+                    `Block #${block.index} exceeds the transaction limit.`
+                );
+            }
+
+            const coinbase =
+                block.transactions[0];
+
+            this.validateCoinbase(
+                coinbase,
+                block.index
+            );
+
+            rebuilt =
+                applyTransactionsToUTXOSet(
+                    rebuilt,
+                    [coinbase]
+                );
+
+            for (
+                const transaction
+                of block.transactions
+                    .slice(1)
+            ) {
+                const valid =
+                    await validateTransaction(
+                        transaction,
+                        rebuilt
+                    );
+
+                if (
+                    !valid
+                ) {
+                    throw new Error(
+                        `Invalid transaction ${
+                            transaction?.id ??
+                            "unknown"
+                        } in block #${
+                            block.index
+                        }.`
+                    );
+                }
+
+                rebuilt =
+                    applyTransactionsToUTXOSet(
+                        rebuilt,
+                        [transaction]
+                    );
+            }
+        }
+
+        return rebuilt;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Coinbase Validation
+    |--------------------------------------------------------------------------
+    */
+
+    validateCoinbase(
+        coinbase,
+        blockHeight
+    ) {
+        if (
+            !coinbase ||
+            coinbase.type !==
+                "coinbase"
+        ) {
+            throw new Error(
+                "Invalid coinbase transaction."
+            );
+        }
+
+        if (
+            !Array.isArray(
+                coinbase.inputs
+            ) ||
+            coinbase.inputs.length !==
+                0
+        ) {
+            throw new Error(
+                "Coinbase transaction must not contain normal inputs."
+            );
+        }
+
+        if (
+            !Array.isArray(
+                coinbase.outputs
+            ) ||
+            coinbase.outputs.length !==
+                1
+        ) {
+            throw new Error(
+                "NovaChain MVP coinbase must contain exactly one output."
+            );
+        }
+
+        const output =
+            coinbase.outputs[0];
+
+        const expectedReward =
+            getBlockReward(
+                blockHeight
+            );
+
+        if (
+            !Number.isSafeInteger(
+                output.amount
+            ) ||
+            output.amount !==
+                expectedReward
+        ) {
+            throw new Error(
+                `Invalid coinbase reward in block #${blockHeight}. Expected ${expectedReward} NNC.`
+            );
+        }
+
+        if (
+            typeof output.address !==
+                "string" ||
+            output.address.length ===
+                0
+        ) {
+            throw new Error(
+                "Coinbase output requires a valid recipient address."
             );
         }
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Persistence
+    |--------------------------------------------------------------------------
+    */
 
     async restoreState() {
         if (
@@ -955,71 +1752,67 @@ export class NetworkState {
             const stored =
                 await this.readPersistedState();
 
-            if (!stored) {
-                return false;
-            }
-
             if (
+                !stored ||
                 !Array.isArray(
                     stored.blocks
                 ) ||
-                stored.blocks.length === 0 ||
-                !Array.isArray(
-                    stored.utxos
-                ) ||
-                !Array.isArray(
-                    stored.mempool
-                )
+                stored.blocks.length ===
+                    0
             ) {
                 return false;
             }
 
-            const previousChain =
-                this.blockchain.chain;
+            /*
+             * UTXO snapshot is NOT trusted.
+             * Rebuild from the chain.
+             */
+            await this.validateChain(
+                stored.blocks
+            );
 
             this.blockchain.chain =
                 stored.blocks;
 
-            const chainValid =
-                await this.blockchain
-                    .isValid();
-
-            if (!chainValid) {
-                this.blockchain.chain =
-                    previousChain;
-
-                return false;
-            }
-
-            this.utxos = [
-                ...stored.utxos,
-            ];
+            this.utxos =
+                await this.rebuildUTXOSet(
+                    stored.blocks
+                );
 
             this.mempool.clear();
 
-            for (
-                const transaction
-                of stored.mempool
-            ) {
-                if (
-                    transaction?.id
-                ) {
-                    this.mempool.add(
-                        transaction
-                    );
-                }
-            }
+            await this.restoreValidMempool(
+                stored.mempool
+            );
+
+            await this
+                .removeConflictingMempoolTransactions();
 
             return true;
-        } catch (error) {
+        } catch (
+            error
+        ) {
             console.warn(
-                "NovaChain local ledger restore failed. Starting from genesis.",
+                "NovaChain persisted state was rejected:",
                 error
             );
 
+            /*
+             * Preserve the blockchain
+             * object's valid genesis.
+             */
+            await this.blockchain
+                .initialize();
+
+            this.utxos = [];
+
+            this.mempool.clear();
+
             return false;
         }
-    }    async persistState() {
+    }
+
+    async persistState() {
         if (
             !this.persistenceAvailable
         ) {
@@ -1027,24 +1820,46 @@ export class NetworkState {
         }
 
         try {
+            const chain =
+                this.getChain();
+
             await this.writePersistedState({
-                version: 1,
+                version:
+                    DB_VERSION,
+
+                protocolVersion:
+                    PROTOCOL.version,
+
+                networkId:
+                    PROTOCOL.networkId,
 
                 blocks:
-                    this.getChain(),
+                    chain,
 
+                /*
+                 * Cached derived state.
+                 *
+                 * Restore never trusts it.
+                 */
                 utxos:
                     this.getUTXOs(),
 
                 mempool:
                     this.getMempoolTransactions(),
 
+                chainWork:
+                    chainWorkToString(
+                        chain
+                    ),
+
                 savedAt:
                     Date.now(),
             });
-        } catch (error) {
+        } catch (
+            error
+        ) {
             console.warn(
-                "NovaChain local ledger persistence failed.",
+                "NovaChain local ledger persistence failed:",
                 error
             );
         }
@@ -1052,7 +1867,10 @@ export class NetworkState {
 
     openDatabase() {
         return new Promise(
-            (resolve, reject) => {
+            (
+                resolve,
+                reject
+            ) => {
                 const request =
                     indexedDB.open(
                         DB_NAME,
@@ -1071,9 +1889,10 @@ export class NetworkState {
                                     STORE_NAME
                                 )
                         ) {
-                            database.createObjectStore(
-                                STORE_NAME
-                            );
+                            database
+                                .createObjectStore(
+                                    STORE_NAME
+                                );
                         }
                     };
 
@@ -1102,7 +1921,10 @@ export class NetworkState {
             await this.openDatabase();
 
         return new Promise(
-            (resolve, reject) => {
+            (
+                resolve,
+                reject
+            ) => {
                 const transaction =
                     database.transaction(
                         STORE_NAME,
@@ -1151,7 +1973,10 @@ export class NetworkState {
             await this.openDatabase();
 
         return new Promise(
-            (resolve, reject) => {
+            (
+                resolve,
+                reject
+            ) => {
                 const transaction =
                     database.transaction(
                         STORE_NAME,
@@ -1201,7 +2026,54 @@ export class NetworkState {
             }
         );
     }
+
+    queueRemoteTransaction(
+        transaction
+    ) {
+        if (
+            !transaction?.id
+        ) {
+            return;
+        }
+
+        if (
+            this.pendingRemoteTransactions.some(
+                (candidate) =>
+                    candidate?.id ===
+                    transaction.id
+            )
+        ) {
+            return;
+        }
+
+        this.pendingRemoteTransactions.push(
+            transaction
+        );
+
+        if (
+            this.pendingRemoteTransactions
+                .length >
+            50
+        ) {
+            this.pendingRemoteTransactions.shift();
+        }
+    }
+
+    requireInitialized() {
+        if (
+            !this.initialized
+        ) {
+            throw new Error(
+                "Network state is not initialized."
+            );
+        }
+    }
 }
 
 export const networkState =
     new NetworkState();
+
+export {
+    PROTOCOL,
+    calculateBlockWork,
+};

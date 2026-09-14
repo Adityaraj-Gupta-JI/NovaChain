@@ -48,8 +48,8 @@ async function bootNovaChain() {
 
                     <p class="hero-description">
                         Initializing node identity,
-                        local ledger, wallet and
-                        live NCCP transport.
+                        wallet, local ledger and
+                        NCCP transport.
                     </p>
                 </section>
             </main>
@@ -57,39 +57,24 @@ async function bootNovaChain() {
     `;
 
     try {
-        /*
-         * Persistent node identity.
-         */
         const nodeIdentity =
             getNodeIdentity();
 
         /*
-         * Persistent wallet.
+         * Wallet is persistent and must
+         * be loaded before networking so
+         * its address is available during
+         * the node join.
          */
         const wallet =
             await createWallet();
 
         /*
-         * Initialize local blockchain,
-         * UTXO state and IndexedDB.
+         * Restore the local ledger BEFORE
+         * connecting to peers.
          */
         await networkState.initialize();
 
-        /*
-         * Determine the NCCP relay.
-         *
-         * Development default:
-         * ws://localhost:8787
-         *
-         * Production:
-         * VITE_NOVACHAIN_SIGNALING_URL
-         */
-        const signalingUrl =
-            getDefaultSignalingUrl();
-
-        /*
-         * Create live network transport.
-         */
         const network =
             new RelayNetwork({
                 nodeId:
@@ -98,11 +83,24 @@ async function bootNovaChain() {
                 walletAddress:
                     wallet.address,
 
-                signalingUrl,
+                signalingUrl:
+                    getDefaultSignalingUrl(),
 
-                /*
-                 * Incoming NCCP messages.
-                 */
+                onStatus:
+                    (
+                        status
+                    ) => {
+                        window.dispatchEvent(
+                            new CustomEvent(
+                                "novachain:network-status",
+                                {
+                                    detail:
+                                        status,
+                                }
+                            )
+                        );
+                    },
+
                 onMessage:
                     async (
                         message
@@ -111,76 +109,122 @@ async function bootNovaChain() {
                             message.type
                         ) {
                             /*
-                             * This node has joined
-                             * the relay.
-                             *
-                             * Ask peers for their
-                             * current chain state.
-                             */
+                            ------------------------------------------------
+                            Node joined network
+                            ------------------------------------------------
+                            */
+
                             case "joined":
+                                /*
+                                 * Give other peers a
+                                 * moment to finish seeing
+                                 * this node before the
+                                 * state request.
+                                 */
                                 window.setTimeout(
                                     () => {
                                         network.requestState();
                                     },
-                                    150
+                                    250
                                 );
 
                                 break;
 
                             /*
-                             * A new node joined.
-                             *
-                             * Existing nodes advertise
-                             * their current state.
-                             */
+                            ------------------------------------------------
+                            Peer joined
+                            ------------------------------------------------
+                            */
+
                             case "peer-joined":
-                                network.broadcastState(
-                                    networkState.getStateSnapshot()
-                                );
-
+                                /*
+                                 * No full-state broadcast
+                                 * here.
+                                 *
+                                 * New peers request state
+                                 * themselves.
+                                 */
                                 break;
 
                             /*
-                             * Another node asks for
-                             * current ledger state.
-                             */
+                            ------------------------------------------------
+                            Peer left
+                            ------------------------------------------------
+                            */
+
+                            case "peer-left":
+                                break;
+
+                            /*
+                            ------------------------------------------------
+                            State request
+                            ------------------------------------------------
+                            */
+
                             case "state-request":
-                                network.broadcastState(
-                                    networkState.getStateSnapshot()
-                                );
+                                if (
+                                    message.senderNodeId &&
+                                    message.senderNodeId !==
+                                        nodeIdentity.nodeId
+                                ) {
+                                    network.sendStateTo(
+                                        message
+                                            .senderNodeId,
+
+                                        networkState
+                                            .getStateSnapshot()
+                                    );
+                                }
 
                                 break;
 
                             /*
-                             * Receive a longer chain/
-                             * current UTXO snapshot.
-                             */
+                            ------------------------------------------------
+                            State response
+                            ------------------------------------------------
+                            */
+
                             case "state-response":
-                                await networkState.adoptRemoteState(
-                                    message.state
-                                );
+                                if (
+                                    !message
+                                        .recipientNodeId ||
+                                    message
+                                        .recipientNodeId ===
+                                        nodeIdentity.nodeId
+                                ) {
+                                    await networkState
+                                        .adoptRemoteState(
+                                            message.state
+                                        );
+                                }
 
                                 break;
 
                             /*
-                             * Receive a transaction
-                             * from another node.
-                             */
+                            ------------------------------------------------
+                            Remote transaction
+                            ------------------------------------------------
+                            */
+
                             case "transaction":
-                                await networkState.receiveRemoteTransaction(
-                                    message.transaction
-                                );
+                                await networkState
+                                    .receiveRemoteTransaction(
+                                        message.transaction
+                                    );
 
                                 break;
 
                             /*
-                             * Receive a mined block
-                             * from another node.
-                             */
+                            ------------------------------------------------
+                            Remote block
+                            ------------------------------------------------
+                            */
+
                             case "block":
-                                await networkState.addExternalBlock(
-                                    message.block
-                                );
+                                await networkState
+                                    .addExternalBlock(
+                                        message.block
+                                    );
 
                                 break;
 
@@ -188,43 +232,27 @@ async function bootNovaChain() {
                                 break;
                         }
                     },
-
-                /*
-                 * Status callback is available
-                 * for future dashboard telemetry.
-                 */
-                onStatus:
-                    (status) => {
-                        console.debug(
-                            "NovaChain NCCP status:",
-                            status
-                        );
-                    },
             });
 
-        /*
-         * Give NetworkState the transport
-         * used for broadcasting.
-         */
         networkState.attachNetworkTransport(
             network
         );
 
         /*
-         * Connect to NCCP relay.
+         * Connect only after the local node
+         * and wallet are ready.
          */
         network.connect();
 
-        /*
-         * Finally render the real dashboard.
-         */
         renderDashboard({
             root,
             nodeIdentity,
             wallet,
             networkState,
         });
-    } catch (error) {
+    } catch (
+        error
+    ) {
         console.error(
             "NovaChain boot failed:",
             error
@@ -245,8 +273,8 @@ async function bootNovaChain() {
 
                         <p class="hero-description">
                             NovaChain could not initialize
-                            the node. Open the browser
-                            console for the technical error.
+                            the node. Open the browser console
+                            for the technical error.
                         </p>
 
                         <button
@@ -254,7 +282,7 @@ async function bootNovaChain() {
                             type="button"
                             onclick="location.reload()"
                         >
-                            Retry Node
+                            RETRY NODE
                         </button>
                     </section>
                 </main>
