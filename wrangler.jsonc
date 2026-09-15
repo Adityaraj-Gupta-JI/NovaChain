@@ -1,0 +1,36 @@
+{
+    "$schema": "./node_modules/wrangler/config-schema.json",
+
+    "name": "novachain",
+
+    "main": "./cloudflare/worker.js",
+
+    "compatibility_date": "2026-09-14",
+
+    "assets": {
+        "directory": "./dist",
+        "binding": "ASSETS",
+        "run_worker_first": [
+            "/ws",
+            "/api/*"
+        ]
+    },
+
+    "durable_objects": {
+        "bindings": [
+            {
+                "name": "NCCP_HUB",
+                "class_name": "NCCPHub"
+            }
+        ]
+    },
+
+    "migrations": [
+        {
+            "tag": "v1",
+            "new_sqlite_classes": [
+                "NCCPHub"
+            ]
+        }
+    ]
+}
