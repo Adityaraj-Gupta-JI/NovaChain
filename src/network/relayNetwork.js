@@ -298,14 +298,23 @@ export class RelayNetwork {
         this.knownPeers = next;
         this.lastRosterUpdate = Date.now();
         this.publishPresence();
+        // Reconcile is also a recovery loop. Failed or closed WebRTC sessions
+        // are retried when the authoritative roster still lists the peer.
         for (const id of next.keys()) {
-            if (String(this.nodeId) < String(id)) this.ensureRtcPeer(id, true);
+            const peer = this.rtcPeers.get(id);
+            if (peer && ["failed", "closed"].includes(peer.pc.connectionState)) {
+                this.dropRtcPeer(id);
+            }
+            if (!this.rtcPeers.has(id) && String(this.nodeId) < String(id)) {
+                this.ensureRtcPeer(id, true);
+            }
         }
     }
 
     publishPresence() {
         this.statusSnapshot = { ...this.statusSnapshot,
-            peerCount: this.connected ? this.knownPeers.size : 0,
+            peerCount: this.connected && this.joined ? this.knownPeers.size : 0,
+            totalNodeCount: this.connected && this.joined ? this.knownPeers.size + 1 : 0,
             directPeerCount: [...this.rtcPeers.values()].filter(p => p.channel?.readyState === "open").length,
             transport: "WebRTC + WebSocket fallback",
             peers: [...this.knownPeers.keys()],
@@ -346,7 +355,12 @@ export class RelayNetwork {
         if (!peer) { channel.close(); return; }
         peer.channel = channel;
         channel.onopen = () => { this.publishPresence(); this.requestState(); };
-        channel.onclose = () => this.publishPresence();
+        channel.onclose = () => {
+            this.publishPresence();
+            // Ask for an authoritative roster instead of assuming the peer left.
+            // The next roster will rebuild a failed peer connection.
+            if (this.connected && this.joined) this.requestPeers();
+        };
         channel.onerror = () => this.publishPresence();
         channel.onmessage = event => this.handleMessage(event.data, true);
     }

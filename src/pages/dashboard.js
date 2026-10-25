@@ -101,7 +101,7 @@ export function renderDashboard({
                 ? Math.max(0, Number(status.peerCount) || 0)
                 : 0;
             badge.textContent = status.connected
-                ? `CONNECTED PEERS: ${count} · DIRECT: ${status.directPeerCount || 0} · RELAY: ${Math.max(0, count - (status.directPeerCount || 0))}`
+                ? `NODES ONLINE: ${count + 1} (YOU + ${count} PEERS) · DIRECT: ${status.directPeerCount || 0} · RELAY: ${Math.max(0, count - (status.directPeerCount || 0))}`
                 : "NETWORK OFFLINE";
         }
     });
@@ -191,7 +191,7 @@ function render(runtime) {
                     ${(() => {
                         const net = networkState.getNetworkStatus();
                         return net.connected
-                            ? `CONNECTED PEERS: ${Math.max(0, Number(net.peerCount) || 0)} · DIRECT: ${net.directPeerCount || 0} · RELAY: ${Math.max(0, Number(net.peerCount || 0) - Number(net.directPeerCount || 0))}`
+                            ? `NODES ONLINE: ${Math.max(0, Number(net.peerCount) || 0) + 1} (YOU + ${Math.max(0, Number(net.peerCount) || 0)} PEERS) · DIRECT: ${net.directPeerCount || 0} · RELAY: ${Math.max(0, Number(net.peerCount || 0) - Number(net.directPeerCount || 0))}`
                             : "NETWORK OFFLINE";
                     })()}
                 </span>

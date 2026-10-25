@@ -140,6 +140,8 @@ export class NetworkState {
                 Number(status?.peerCount ?? 0),
             directPeerCount:
                 Number(status?.directPeerCount ?? 0),
+            totalNodeCount:
+                Number(status?.totalNodeCount ?? (status?.connected ? Number(status?.peerCount ?? 0) + 1 : 0)),
             peers: status?.peers ?? [],
 
             signalingUrl:
