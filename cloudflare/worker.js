@@ -286,27 +286,45 @@ export class NCCPHub extends DurableObject {
             return;
         }
 
+        // Respond from current Durable Object WebSocket attachments.
+        // A client can recover its roster even if a join event was missed.
+        if (message.type === "peers-request") {
+            const peers = this.getSockets()
+                .filter(s => s !== socket)
+                .map(s => this.getPeer(s))
+                .filter(p => p?.joined)
+                .map(p => ({ nodeId: p.nodeId, walletAddress: p.walletAddress }));
+            this.safeSend(socket, {
+                type: "peers-snapshot",
+                peerCount: peers.length + 1,
+                peers,
+                protocol: PROTOCOL_VERSION,
+                timestamp: Date.now(),
+            });
+            return;
+        }
+
         /*
          * Keep the edge layer intentionally dumb:
          * after a node has joined, forward NCCP messages.
          *
          * The browsers perform blockchain validation.
          */
-        this.broadcast(
-            {
-                ...message,
-                senderNodeId:
-                    peer.nodeId ??
-                    message.senderNodeId ??
-                    null,
-                forwardedAt:
-                    Date.now(),
-                protocol:
-                    message.protocol ??
-                    PROTOCOL_VERSION,
-            },
-            socket,
-        );
+        const payload = {
+            ...message,
+            senderNodeId: peer.nodeId,
+            forwardedAt: Date.now(),
+            protocol: PROTOCOL_VERSION,
+        };
+        const excluded = Array.isArray(message.excludeNodeIds) ? message.excludeNodeIds : [];
+        for (const otherSocket of this.getSockets()) {
+            if (otherSocket === socket) continue;
+            const other = this.getPeer(otherSocket);
+            if (!other?.joined) continue;
+            if (message.recipientNodeId && message.recipientNodeId !== other.nodeId) continue;
+            if (excluded.includes(other.nodeId)) continue;
+            this.safeSend(otherSocket, payload);
+        }
     }
 
     webSocketClose(
@@ -487,6 +505,9 @@ export class NCCPHub extends DurableObject {
                 network:
                     peer.network,
                 peerCount,
+                peers: this.getSockets().filter(s => s !== socket)
+                    .map(s => this.getPeer(s)).filter(p => p?.joined)
+                    .map(p => ({ nodeId: p.nodeId, walletAddress: p.walletAddress })),
                 protocol:
                     PROTOCOL_VERSION,
                 timestamp:

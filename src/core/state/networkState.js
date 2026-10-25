@@ -137,9 +137,10 @@ export class NetworkState {
                 ),
 
             peerCount:
-                Number(
-                    status?.peerCount ?? 0
-                ),
+                Number(status?.peerCount ?? 0),
+            directPeerCount:
+                Number(status?.directPeerCount ?? 0),
+            peers: status?.peers ?? [],
 
             signalingUrl:
                 status?.url ?? null,

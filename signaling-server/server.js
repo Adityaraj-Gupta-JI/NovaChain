@@ -164,6 +164,7 @@ wss.on(
 
                             peerCount:
                                 peers.size,
+                            peers: [...peers.values()].filter(p => p.nodeId !== nodeId).map(p => ({ nodeId: p.nodeId, walletAddress: p.walletAddress })),
 
                             protocol:
                                 "NCCP-0.1",
@@ -221,6 +222,20 @@ wss.on(
                     return;
                 }
 
+                // Presence snapshots are authoritative and never relayed.
+                if (message.type === "peers-request") {
+                    safeSend(socket, {
+                        type: "peers-snapshot",
+                        peerCount: peers.size,
+                        peers: [...peers.values()]
+                            .filter(p => p.nodeId !== peerRecord.nodeId)
+                            .map(p => ({ nodeId: p.nodeId, walletAddress: p.walletAddress })),
+                        timestamp: Date.now(),
+                        protocol: "NCCP-0.1",
+                    });
+                    return;
+                }
+
                 /*
                 |--------------------------------------------------------------------------
                 | NCCP FORWARDING
@@ -269,10 +284,11 @@ wss.on(
                     return;
                 }
 
-                broadcast(
-                    payload,
-                    socket
-                );
+                for (const other of peers.values()) {
+                    if (other.socket === socket) continue;
+                    if (Array.isArray(message.excludeNodeIds) && message.excludeNodeIds.includes(other.nodeId)) continue;
+                    safeSend(other.socket, payload);
+                }
             }
         );
 

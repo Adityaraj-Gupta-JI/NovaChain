@@ -91,6 +91,21 @@ export function renderDashboard({
 
     bindEvents(runtime);
 
+    // Peer presence updates immediately on NCCP membership events.
+    // Update only the badge; do not interrupt mining or form inputs.
+    window.addEventListener("novachain:network-status", (event) => {
+        const status = event.detail ?? {};
+        const badge = root.querySelector("[data-peer-presence]");
+        if (badge) {
+            const count = status.connected
+                ? Math.max(0, Number(status.peerCount) || 0)
+                : 0;
+            badge.textContent = status.connected
+                ? `CONNECTED PEERS: ${count} · DIRECT: ${status.directPeerCount || 0} · RELAY: ${Math.max(0, count - (status.directPeerCount || 0))}`
+                : "NETWORK OFFLINE";
+        }
+    });
+
     startRefresh(runtime);
 }
 
@@ -170,6 +185,16 @@ function render(runtime) {
                         }
                     </span>
                 </div>
+
+                <span data-peer-presence aria-live="polite"
+                    style="font-size:0.75rem;letter-spacing:0.04em;opacity:0.9;">
+                    ${(() => {
+                        const net = networkState.getNetworkStatus();
+                        return net.connected
+                            ? `CONNECTED PEERS: ${Math.max(0, Number(net.peerCount) || 0)} · DIRECT: ${net.directPeerCount || 0} · RELAY: ${Math.max(0, Number(net.peerCount || 0) - Number(net.directPeerCount || 0))}`
+                            : "NETWORK OFFLINE";
+                    })()}
+                </span>
 
             </header>
 
