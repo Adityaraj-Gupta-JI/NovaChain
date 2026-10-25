@@ -494,5 +494,11 @@ export function getDefaultSignalingUrl() {
         );
     }
 
+    // Use the deployed Worker hub in production; keep the local relay in Vite dev.
+    if (typeof window !== "undefined" && !import.meta.env?.DEV) {
+        const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+        return `${scheme}//${window.location.host}/ws`;
+    }
+
     return DEFAULT_SIGNALING_URL;
 }
