@@ -239,6 +239,9 @@ wss.on(
                 const payload = {
                     ...message,
 
+                    // Bind the sender to the joined WebSocket, not client input.
+                    senderNodeId: peerRecord.nodeId,
+
                     forwardedAt:
                         Date.now(),
                 };
