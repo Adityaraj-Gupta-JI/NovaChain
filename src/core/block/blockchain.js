@@ -5,6 +5,9 @@ import {
 
 import { calculateMerkleRoot } from "./merkle.js";
 
+// Shared across browser nodes; changing it requires a network reset.
+const GENESIS_TIMESTAMP = 1704067200000;
+
 /**
  * NovaChain Blockchain
  *
@@ -58,6 +61,7 @@ export class Blockchain {
             difficulty: 0,
         });
 
+        genesis.timestamp = GENESIS_TIMESTAMP;
         genesis.hash = await calculateBlockHash(genesis);
 
         return genesis;
