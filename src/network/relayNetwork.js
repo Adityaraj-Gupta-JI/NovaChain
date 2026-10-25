@@ -1,218 +1,26 @@
+/*
+ * NovaChain browser network transport.
+ *
+ * The WebSocket server is only a relay.
+ *
+ * It does NOT:
+ *   - own the blockchain
+ *   - own wallets
+ *   - store private keys
+ *   - calculate balances
+ *
+ * It only forwards NCCP messages between connected nodes.
+ *
+ * Messages:
+ *   join
+ *   state-request
+ *   state-response
+ *   transaction
+ *   block
+ */
+
 const DEFAULT_SIGNALING_URL =
     "ws://localhost:8787";
-
-/*
-|--------------------------------------------------------------------------
-| Binary-safe wire encoding
-|--------------------------------------------------------------------------
-|
-| WebSocket transport uses JSON.
-|
-| ECDSA signatures may contain Uint8Array /
-| ArrayBuffer data.
-|
-| We encode these values explicitly instead
-| of letting JSON.stringify transform them
-| into ordinary objects.
-|--------------------------------------------------------------------------
-*/
-
-function bytesToBase64(
-    bytes
-) {
-    const array =
-        bytes instanceof Uint8Array
-            ? bytes
-            : new Uint8Array(
-                bytes
-            );
-
-    let binary =
-        "";
-
-    const chunkSize =
-        0x8000;
-
-    for (
-        let index = 0;
-        index < array.length;
-        index += chunkSize
-    ) {
-        binary +=
-            String.fromCharCode(
-                ...array.subarray(
-                    index,
-                    index +
-                        chunkSize
-                )
-            );
-    }
-
-    return btoa(
-        binary
-    );
-}
-
-function base64ToBytes(
-    value
-) {
-    const binary =
-        atob(value);
-
-    const bytes =
-        new Uint8Array(
-            binary.length
-        );
-
-    for (
-        let index = 0;
-        index <
-        binary.length;
-        index += 1
-    ) {
-        bytes[index] =
-            binary.charCodeAt(
-                index
-            );
-    }
-
-    return bytes;
-}
-
-function encodeForWire(
-    value
-) {
-    if (
-        value instanceof
-        Uint8Array
-    ) {
-        return {
-            __ncType:
-                "bytes",
-
-            value:
-                bytesToBase64(
-                    value
-                ),
-        };
-    }
-
-    if (
-        value instanceof
-        ArrayBuffer
-    ) {
-        return {
-            __ncType:
-                "bytes",
-
-            value:
-                bytesToBase64(
-                    value
-                ),
-        };
-    }
-
-    if (
-        Array.isArray(value)
-    ) {
-        return value.map(
-            encodeForWire
-        );
-    }
-
-    if (
-        value &&
-        typeof value ===
-            "object"
-    ) {
-        const output =
-            {};
-
-        for (
-            const [
-                key,
-                child,
-            ] of Object.entries(
-                value
-            )
-        ) {
-            output[key] =
-                encodeForWire(
-                    child
-                );
-        }
-
-        return output;
-    }
-
-    return value;
-}
-
-function decodeFromWire(
-    value
-) {
-    if (
-        Array.isArray(value)
-    ) {
-        return value.map(
-            decodeFromWire
-        );
-    }
-
-    if (
-        value &&
-        typeof value ===
-            "object"
-    ) {
-        if (
-            value.__ncType ===
-                "bytes" &&
-            typeof value.value ===
-                "string"
-        ) {
-            return base64ToBytes(
-                value.value
-            );
-        }
-
-        const output =
-            {};
-
-        for (
-            const [
-                key,
-                child,
-            ] of Object.entries(
-                value
-            )
-        ) {
-            output[key] =
-                decodeFromWire(
-                    child
-                );
-        }
-
-        return output;
-    }
-
-    return value;
-}
-
-function createMessageId() {
-    if (
-        globalThis.crypto
-            ?.randomUUID
-    ) {
-        return crypto.randomUUID();
-    }
-
-    return (
-        `nc-${Date.now()}-` +
-        Math.random()
-            .toString(16)
-            .slice(2)
-    );
-}
 
 export class RelayNetwork {
     constructor({
@@ -224,12 +32,10 @@ export class RelayNetwork {
         onStatus,
     } = {}) {
         this.nodeId =
-            nodeId ??
-            null;
+            nodeId ?? null;
 
         this.walletAddress =
-            walletAddress ??
-            null;
+            walletAddress ?? null;
 
         this.signalingUrl =
             signalingUrl;
@@ -255,9 +61,6 @@ export class RelayNetwork {
         this.reconnectAttempt =
             0;
 
-        this.seenMessages =
-            new Set();
-
         this.statusSnapshot = {
             status:
                 "OFFLINE",
@@ -265,32 +68,25 @@ export class RelayNetwork {
             peerCount:
                 0,
 
+            url:
+                this.signalingUrl,
+
             connected:
                 false,
-
-            url:
-                signalingUrl,
-
-            error:
-                null,
         };
     }
 
     connect() {
-        if (
-            this.destroyed
-        ) {
+        if (this.destroyed) {
             return;
         }
 
         if (
             this.socket &&
             (
-                this.socket
-                    .readyState ===
+                this.socket.readyState ===
                     WebSocket.OPEN ||
-                this.socket
-                    .readyState ===
+                this.socket.readyState ===
                     WebSocket.CONNECTING
             )
         ) {
@@ -306,9 +102,7 @@ export class RelayNetwork {
                 new WebSocket(
                     this.signalingUrl
                 );
-        } catch (
-            error
-        ) {
+        } catch (error) {
             this.setStatus(
                 "OFFLINE",
                 error
@@ -346,7 +140,10 @@ export class RelayNetwork {
                         "nova-main",
 
                     protocol:
-                        "NCCP-0.2",
+                        "NCCP-0.1",
+
+                    timestamp:
+                        Date.now(),
                 });
             }
         );
@@ -399,15 +196,15 @@ export class RelayNetwork {
             clearTimeout(
                 this.reconnectTimer
             );
+
+            this.reconnectTimer =
+                null;
         }
 
-        this.reconnectTimer =
-            null;
-
-        try {
-            this.socket?.close();
-        } catch {
-            // Ignore close errors.
+        if (
+            this.socket
+        ) {
+            this.socket.close();
         }
 
         this.socket =
@@ -421,9 +218,7 @@ export class RelayNetwork {
         );
     }
 
-    send(
-        message
-    ) {
+    send(message) {
         if (
             !this.socket ||
             this.socket.readyState !==
@@ -432,41 +227,22 @@ export class RelayNetwork {
             return false;
         }
 
-        const wireMessage =
-            encodeForWire({
-                ...message,
-
-                messageId:
-                    message.messageId ??
-                    createMessageId(),
-
-                senderNodeId:
-                    this.nodeId,
-
-                protocol:
-                    message.protocol ??
-                    "NCCP-0.2",
-
-                network:
-                    message.network ??
-                    "nova-main",
-
-                timestamp:
-                    message.timestamp ??
-                    Date.now(),
-            });
-
         try {
             this.socket.send(
-                JSON.stringify(
-                    wireMessage
-                )
+                JSON.stringify({
+                    ...message,
+
+                    senderNodeId:
+                        this.nodeId,
+
+                    protocol:
+                        message.protocol ??
+                        "NCCP-0.1",
+                })
             );
 
             return true;
-        } catch (
-            error
-        ) {
+        } catch (error) {
             console.error(
                 "NovaChain network send failed:",
                 error
@@ -508,98 +284,125 @@ export class RelayNetwork {
         });
     }
 
-    sendStateTo(
-        recipientNodeId,
+    broadcastState(
         state
     ) {
         return this.send({
             type:
                 "state-response",
 
-            recipientNodeId,
+            state,
+        });
+    }
+
+    /*
+     * Send state directly to one requesting node.
+     */
+    sendStateTo(
+        nodeId,
+        state
+    ) {
+        return this.send({
+            type:
+                "state-response",
+
+            recipientNodeId:
+                nodeId ?? null,
 
             state,
         });
     }
 
+    /*
+     * Compatibility helper.
+     *
+     * The browser previously produced:
+     *
+     *   sendStateTo is not a function
+     *
+     * Keep this explicit alias so the transport remains compatible
+     * with code using that method name.
+     */
+    sendState(
+        nodeId,
+        state
+    ) {
+        return this.sendStateTo(
+            nodeId,
+            state
+        );
+    }
+
     handleMessage(
         rawData
     ) {
+        let message;
+
         try {
-            const parsed =
+            message =
                 typeof rawData ===
                     "string"
                     ? JSON.parse(
                         rawData
                     )
                     : rawData;
+        } catch (error) {
+            console.warn(
+                "NovaChain received invalid network JSON.",
+                error
+            );
 
-            const message =
-                decodeFromWire(
-                    parsed
-                );
+            return;
+        }
 
-            if (
-                !message ||
-                typeof message.type !==
-                    "string"
-            ) {
-                return;
-            }
+        if (
+            !message ||
+            typeof message.type !==
+                "string"
+        ) {
+            return;
+        }
 
-            if (
-                message.messageId
-            ) {
-                if (
-                    this.seenMessages.has(
-                        message.messageId
-                    )
-                ) {
-                    return;
-                }
+        /*
+         * Network membership messages update telemetry.
+         */
+        if (
+            message.type ===
+                "joined" ||
+            message.type ===
+                "peer-joined" ||
+            message.type ===
+                "peer-left"
+        ) {
+            this.statusSnapshot = {
+                ...this.statusSnapshot,
 
-                this.seenMessages.add(
-                    message.messageId
-                );
+                peerCount:
+                    Number(
+                        message.peerCount ??
+                        this.statusSnapshot.peerCount ??
+                        0
+                    ),
 
-                if (
-                    this.seenMessages.size >
-                    2000
-                ) {
-                    const first =
-                        this.seenMessages
-                            .values()
-                            .next()
-                            .value;
+                status:
+                    this.connected
+                        ? "ONLINE"
+                        : this.statusSnapshot.status,
 
-                    this.seenMessages.delete(
-                        first
-                    );
-                }
-            }
+                connected:
+                    this.connected,
 
-            if (
-                message.peerCount !==
-                undefined
-            ) {
-                this.statusSnapshot = {
-                    ...this
-                        .statusSnapshot,
+                url:
+                    this.signalingUrl,
+            };
+        }
 
-                    peerCount:
-                        Number(
-                            message.peerCount
-                        ) || 0,
-
-                    connected:
-                        this.connected,
-                };
-
-                this.onStatus?.(
-                    this.statusSnapshot
-                );
-            }
-
+        try {
+            /*
+             * onMessage may be async.
+             * Promise rejection is explicitly caught here
+             * so network errors are not left as unhandled promises.
+             */
             Promise.resolve(
                 this.onMessage?.(
                     message
@@ -612,11 +415,9 @@ export class RelayNetwork {
                     );
                 }
             );
-        } catch (
-            error
-        ) {
-            console.warn(
-                "NovaChain received invalid network message:",
+        } catch (error) {
+            console.error(
+                "NovaChain network message handler failed:",
                 error
             );
         }
@@ -630,7 +431,8 @@ export class RelayNetwork {
             return;
         }
 
-        this.reconnectAttempt += 1;
+        this.reconnectAttempt +=
+            1;
 
         const delay =
             Math.min(
@@ -639,9 +441,7 @@ export class RelayNetwork {
                 500 *
                     2 **
                         Math.min(
-                            this.reconnectAttempt -
-                                1,
-
+                            this.reconnectAttempt - 1,
                             5
                         )
             );
@@ -663,8 +463,7 @@ export class RelayNetwork {
         error = null
     ) {
         this.statusSnapshot = {
-            ...this
-                .statusSnapshot,
+            ...this.statusSnapshot,
 
             status,
 
@@ -684,9 +483,16 @@ export class RelayNetwork {
 }
 
 export function getDefaultSignalingUrl() {
-    return (
-        import.meta.env
-            ?.VITE_NOVACHAIN_SIGNALING_URL ??
-        DEFAULT_SIGNALING_URL
-    );
+    if (
+        typeof import.meta !==
+            "undefined" &&
+        import.meta.env?.VITE_NOVACHAIN_SIGNALING_URL
+    ) {
+        return (
+            import.meta.env
+                .VITE_NOVACHAIN_SIGNALING_URL
+        );
+    }
+
+    return DEFAULT_SIGNALING_URL;
 }

@@ -80,13 +80,17 @@ export function renderDashboard({
         miningStartedAt: null,
         miningNonce: 0,
         miningHash: "",
+
         lastBlockHeight:
             getBlockHeight(networkState),
+
         refreshTimer: null,
     };
 
     render(runtime);
+
     bindEvents(runtime);
+
     startRefresh(runtime);
 }
 
@@ -140,18 +144,29 @@ function render(runtime) {
                     type="button"
                     data-scroll="top"
                 >
-                    <span class="brand-symbol">✦</span>
-                    <span class="brand-name">NOVA</span>
+                    <span class="brand-symbol">
+                        ✦
+                    </span>
+
+                    <span class="brand-name">
+                        NOVA
+                    </span>
                 </button>
 
                 <div
-                    class="network-status ${runtime.mining ? "is-busy" : ""}"
+                    class="network-status ${
+                        runtime.mining
+                            ? "is-busy"
+                            : ""
+                    }"
                 >
                     <span class="status-dot"></span>
+
                     <span>
-                        ${runtime.mining
-                            ? "MINING"
-                            : "NODE ONLINE"
+                        ${
+                            runtime.mining
+                                ? "MINING"
+                                : "NODE ONLINE"
                         }
                     </span>
                 </div>
@@ -190,6 +205,7 @@ function render(runtime) {
                     <div class="spotlight-topline">
 
                         <div>
+
                             <p class="eyebrow">
                                 NOVACHAIN // LIVE NETWORK
                             </p>
@@ -201,7 +217,9 @@ function render(runtime) {
                                     )
                                 )}
                             </h1>
+
                         </div>
+
 
                         <div class="live-indicator">
                             <span class="live-pulse"></span>
@@ -215,7 +233,8 @@ function render(runtime) {
                         ${escapeHtml(
                             getDescription(
                                 currentStage,
-                                mempool.length
+                                mempool.length,
+                                blockHeight
                             )
                         )}
                     </p>
@@ -225,6 +244,7 @@ function render(runtime) {
                         class="consensus-flow"
                         aria-label="NovaChain transaction lifecycle"
                     >
+
                         ${flowStep(
                             "CREATE",
                             "01",
@@ -295,14 +315,18 @@ function render(runtime) {
                                 "CONFIRMED",
                             ]
                         )}
+
                     </div>
 
 
                     <div class="operation-readout">
 
                         <div class="operation-icon">
-                            ${stageIcon(currentStage)}
+                            ${stageIcon(
+                                currentStage
+                            )}
                         </div>
+
 
                         <div class="operation-copy">
 
@@ -320,12 +344,14 @@ function render(runtime) {
                                 ${escapeHtml(
                                     operationDetail(
                                         runtime,
-                                        snapshot
+                                        snapshot,
+                                        blockHeight
                                     )
                                 )}
                             </small>
 
                         </div>
+
 
                         <div class="operation-value">
                             ${
@@ -366,7 +392,9 @@ function render(runtime) {
 
                     <div class="section-heading">
                         <span>◎</span>
-                        <span>YOUR NOVACOIN WALLET</span>
+                        <span>
+                            YOUR NOVACOIN WALLET
+                        </span>
                     </div>
 
 
@@ -398,12 +426,15 @@ function render(runtime) {
 
 
                         <div class="coin-display">
+
                             <div class="coin-face">
                                 N
                             </div>
+
                             <span>
                                 NVC
                             </span>
+
                         </div>
 
                     </div>
@@ -434,28 +465,37 @@ function render(runtime) {
                             class="action-tile action-mine"
                             type="button"
                             data-action="mine"
-                            ${runtime.mining ? "disabled" : ""}
+                            ${
+                                runtime.mining
+                                    ? "disabled"
+                                    : ""
+                            }
                         >
+
                             <span class="action-icon">
-                                ${runtime.mining
-                                    ? "◌"
-                                    : "⛏"
+                                ${
+                                    runtime.mining
+                                        ? "◌"
+                                        : "⛏"
                                 }
                             </span>
 
                             <span class="action-name">
-                                ${runtime.mining
-                                    ? "MINING"
-                                    : "MINE"
+                                ${
+                                    runtime.mining
+                                        ? "MINING"
+                                        : "MINE"
                                 }
                             </span>
 
                             <small>
-                                ${runtime.mining
-                                    ? "WORKING"
-                                    : "PROOF OF WORK"
+                                ${
+                                    runtime.mining
+                                        ? "WORKING"
+                                        : "PROOF OF WORK"
                                 }
                             </small>
+
                         </button>
 
 
@@ -464,6 +504,7 @@ function render(runtime) {
                             type="button"
                             data-action="receive"
                         >
+
                             <span class="action-icon">
                                 ↓
                             </span>
@@ -475,6 +516,7 @@ function render(runtime) {
                             <small>
                                 WALLET ADDRESS
                             </small>
+
                         </button>
 
                     </div>
@@ -491,7 +533,10 @@ function render(runtime) {
 
                     <div class="section-heading">
                         <span>☁</span>
-                        <span>LOCAL NODE TELEMETRY</span>
+
+                        <span>
+                            LOCAL NODE TELEMETRY
+                        </span>
                     </div>
 
 
@@ -517,7 +562,9 @@ function render(runtime) {
 
                         ${metric(
                             "UTXO",
-                            networkState.getUTXOs().length,
+                            networkState
+                                .getUTXOs()
+                                .length,
                             "OUTPUTS"
                         )}
 
@@ -535,13 +582,17 @@ function render(runtime) {
 
                     <div class="section-heading">
                         <span>✹</span>
-                        <span>VISUAL CONSENSUS ENGINE</span>
+
+                        <span>
+                            VISUAL CONSENSUS ENGINE
+                        </span>
                     </div>
 
 
                     <div class="consensus-header">
 
                         <div>
+
                             <h2>
                                 Watch the ledger move.
                             </h2>
@@ -551,13 +602,18 @@ function render(runtime) {
                                 corresponds to a real local
                                 blockchain operation.
                             </p>
+
                         </div>
 
+
                         <div class="consensus-status">
+
                             <span class="status-dot"></span>
+
                             ${escapeHtml(
                                 currentStage
                             )}
+
                         </div>
 
                     </div>
@@ -584,7 +640,11 @@ function render(runtime) {
                         ${consensusNode(
                             "02",
                             "MEMPOOL",
-                            `${mempool.length} pending transaction${mempool.length === 1 ? "" : "s"}`,
+                            `${mempool.length} pending transaction${
+                                mempool.length === 1
+                                    ? ""
+                                    : "s"
+                            }`,
                             currentStage,
                             [
                                 "MEMPOOL",
@@ -602,7 +662,9 @@ function render(runtime) {
                                 ? `Searching nonce ${formatInteger(
                                     runtime.miningNonce
                                 )}`
-                                : "Awaiting work",
+                                : blockHeight === 0
+                                    ? "Bootstrap block available"
+                                    : "Awaiting work",
                             currentStage,
                             [
                                 "MINING",
@@ -635,24 +697,44 @@ function render(runtime) {
                 >
 
                     <div class="section-heading">
-                        <span>≋</span>
-                        <span>LIVE ACTIVITY</span>
+
+                        <span>
+                            ≋
+                        </span>
+
+                        <span>
+                            LIVE ACTIVITY
+                        </span>
+
                     </div>
 
+
                     <div class="activity-list">
+
                         ${renderActivity(
                             runtime.activity,
                             mempool
                         )}
+
                     </div>
 
-                </section>                <!-- BLOCK -->
+                </section>
+
+
+                <!-- BLOCK -->
 
                 <section class="block-card">
 
                     <div class="section-heading">
-                        <span>▣</span>
-                        <span>LATEST BLOCK</span>
+
+                        <span>
+                            ▣
+                        </span>
+
+                        <span>
+                            LATEST BLOCK
+                        </span>
+
                     </div>
 
                     ${renderBlock(
@@ -670,8 +752,15 @@ function render(runtime) {
                 >
 
                     <div class="section-heading">
-                        <span>◉</span>
-                        <span>YOUR NODE</span>
+
+                        <span>
+                            ◉
+                        </span>
+
+                        <span>
+                            YOUR NODE
+                        </span>
+
                     </div>
 
 
@@ -680,6 +769,7 @@ function render(runtime) {
                         <div class="node-avatar">
                             ✦
                         </div>
+
 
                         <div class="node-identity-copy">
 
@@ -712,6 +802,7 @@ function render(runtime) {
                             WALLET ADDRESS
                         </span>
 
+
                         <div class="address-row">
 
                             <code>
@@ -719,6 +810,7 @@ function render(runtime) {
                                     wallet.address
                                 )}
                             </code>
+
 
                             <button
                                 class="copy-button"
@@ -740,10 +832,21 @@ function render(runtime) {
                 <details class="technical-card">
 
                     <summary>
-                        <span>⌘</span>
-                        <strong>RAW NODE STATE</strong>
-                        <span>+</span>
+
+                        <span>
+                            ⌘
+                        </span>
+
+                        <strong>
+                            RAW NODE STATE
+                        </strong>
+
+                        <span>
+                            +
+                        </span>
+
                     </summary>
+
 
                     <pre>${escapeHtml(
                         JSON.stringify(
@@ -774,6 +877,7 @@ function render(runtime) {
                     <small>HOME</small>
                 </button>
 
+
                 <button
                     class="nav-item"
                     type="button"
@@ -782,6 +886,7 @@ function render(runtime) {
                     <span>◉</span>
                     <small>NETWORK</small>
                 </button>
+
 
                 <button
                     class="nav-item"
@@ -792,6 +897,7 @@ function render(runtime) {
                     <small>WALLET</small>
                 </button>
 
+
                 <button
                     class="nav-item"
                     type="button"
@@ -800,6 +906,7 @@ function render(runtime) {
                     <span>≋</span>
                     <small>ACTIVITY</small>
                 </button>
+
 
                 <button
                     class="nav-item"
@@ -846,13 +953,16 @@ function render(runtime) {
                     ×
                 </button>
 
+
                 <p class="eyebrow">
                     NOVACHAIN // TRANSACTION
                 </p>
 
+
                 <h2 id="send-title">
                     SEND NVC
                 </h2>
+
 
                 <p class="modal-description">
                     Create and sign a real transaction using
@@ -886,6 +996,7 @@ function render(runtime) {
                             AMOUNT
                         </span>
 
+
                         <div class="amount-input">
 
                             <input
@@ -910,6 +1021,7 @@ function render(runtime) {
                     <div class="send-preview">
 
                         <div>
+
                             <span>
                                 AVAILABLE
                             </span>
@@ -919,9 +1031,12 @@ function render(runtime) {
                                     balance
                                 )} NVC
                             </strong>
+
                         </div>
 
+
                         <div>
+
                             <span>
                                 FLOW
                             </span>
@@ -929,6 +1044,7 @@ function render(runtime) {
                             <strong>
                                 SIGN → MEMPOOL
                             </strong>
+
                         </div>
 
                     </div>
@@ -971,25 +1087,32 @@ function render(runtime) {
                     ×
                 </button>
 
+
                 <p class="eyebrow">
                     NOVACHAIN // RECEIVE
                 </p>
+
 
                 <h2>
                     YOUR ADDRESS
                 </h2>
 
+
                 <p class="modal-description">
                     Share this address with another NovaChain node.
                 </p>
 
+
                 <div class="receive-address">
+
                     <code>
                         ${escapeHtml(
                             wallet.address
                         )}
                     </code>
+
                 </div>
+
 
                 <button
                     class="primary-button"
@@ -1013,13 +1136,12 @@ function render(runtime) {
 */
 
 function bindEvents(runtime) {
-    const {
-        root,
-    } = runtime;
+    const { root } = runtime;
 
     root.addEventListener(
         "click",
         async (event) => {
+
             const action =
                 event.target.closest(
                     "[data-action]"
@@ -1030,7 +1152,9 @@ function bindEvents(runtime) {
                     "[data-scroll]"
                 );
 
+
             if (scroll) {
+
                 scrollTo(
                     scroll.dataset.scroll
                 );
@@ -1043,48 +1167,69 @@ function bindEvents(runtime) {
                 return;
             }
 
+
             if (!action) {
                 return;
             }
 
+
             switch (
                 action.dataset.action
             ) {
+
                 case "send":
+
                     openModal(
                         "send-modal"
                     );
+
                     break;
 
+
                 case "mine":
+
                     await handleMine(
                         runtime
                     );
+
                     break;
 
+
                 case "receive":
+
                     openModal(
                         "receive-modal"
                     );
+
                     break;
 
+
                 case "copy":
+
                     await copyAddress(
                         runtime
                     );
+
                     break;
 
+
                 case "close-send":
+
                     closeModal(
                         "send-modal"
                     );
+
                     break;
 
+
                 case "close-receive":
+
                     closeModal(
                         "receive-modal"
                     );
+
                     break;
+
 
                 default:
                     break;
@@ -1092,9 +1237,11 @@ function bindEvents(runtime) {
         }
     );
 
+
     root.addEventListener(
         "submit",
         async (event) => {
+
             if (
                 event.target.id !==
                 "send-form"
@@ -1111,9 +1258,11 @@ function bindEvents(runtime) {
         }
     );
 
+
     document.addEventListener(
         "keydown",
         (event) => {
+
             if (
                 event.key !== "Escape"
             ) {
@@ -1147,6 +1296,7 @@ async function handleSend(
             "#recipient-address"
         ).value.trim();
 
+
     const amountNvc =
         Number(
             form.querySelector(
@@ -1154,12 +1304,15 @@ async function handleSend(
             ).value
         );
 
+
     const submit =
         form.querySelector(
             "#send-submit"
         );
 
+
     if (!recipient) {
+
         showToast(
             runtime,
             "Recipient address is required.",
@@ -1169,12 +1322,14 @@ async function handleSend(
         return;
     }
 
+
     if (
         !Number.isFinite(
             amountNvc
         ) ||
         amountNvc <= 0
     ) {
+
         showToast(
             runtime,
             "Enter a valid NVC amount.",
@@ -1184,11 +1339,13 @@ async function handleSend(
         return;
     }
 
+
     const amountNnc =
         Math.round(
             amountNvc *
             NNC_PER_NVC
         );
+
 
     if (
         !Number.isSafeInteger(
@@ -1196,6 +1353,7 @@ async function handleSend(
         ) ||
         amountNnc <= 0
     ) {
+
         showToast(
             runtime,
             "Amount is outside the supported range.",
@@ -1205,10 +1363,14 @@ async function handleSend(
         return;
     }
 
+
     try {
+
         submit.disabled = true;
+
         submit.textContent =
             "CREATING...";
+
 
         setStage(
             runtime,
@@ -1220,8 +1382,10 @@ async function handleSend(
 
         await nextFrame();
 
+
         submit.textContent =
             "SIGNING...";
+
 
         setStage(
             runtime,
@@ -1232,6 +1396,7 @@ async function handleSend(
         render(runtime);
 
         await nextFrame();
+
 
         const transaction =
             await runtime.networkState.createPayment({
@@ -1245,24 +1410,30 @@ async function handleSend(
                     amountNnc,
             });
 
+
         addActivity(
             runtime,
             {
                 type: "transaction",
+
                 title:
                     "Transaction entered mempool",
+
                 detail:
                     `TX ${shortId(
                         transaction.id
                     )} · ${formatNvc(
                         amountNnc
                     )} NVC`,
+
                 timestamp:
                     Date.now(),
+
                 txId:
                     transaction.id,
             }
         );
+
 
         setStage(
             runtime,
@@ -1270,45 +1441,57 @@ async function handleSend(
             "Signed transaction is waiting for mining."
         );
 
+
         showToast(
             runtime,
             "Transaction signed and added to mempool.",
             "success"
         );
 
+
         closeModal(
             "send-modal"
         );
+
 
         form.reset();
 
         render(runtime);
 
     } catch (error) {
+
         console.error(
             "NovaChain transaction failed:",
             error
         );
 
+
         setStage(
             runtime,
             "READY",
             getErrorMessage(error)
-        );        showToast(
+        );
+
+
+        showToast(
             runtime,
             getErrorMessage(error),
             "error"
         );
 
+
         render(runtime);
 
     } finally {
+
         const currentSubmit =
             document.querySelector(
                 "#send-submit"
             );
 
+
         if (currentSubmit) {
+
             currentSubmit.disabled =
                 false;
 
@@ -1323,6 +1506,19 @@ async function handleSend(
 |--------------------------------------------------------------------------
 | Mining
 |--------------------------------------------------------------------------
+|
+| IMPORTANT:
+|
+| Height 0 + empty mempool
+|     → first bootstrap block is allowed.
+|
+| Height > 0 + empty mempool
+|     → mining is rejected.
+|
+| Height > 0 + pending transactions
+|     → mining is allowed.
+|
+|--------------------------------------------------------------------------
 */
 
 async function handleMine(
@@ -1332,9 +1528,68 @@ async function handleMine(
         return;
     }
 
+
     const pending =
         runtime.networkState
             .getMempoolTransactions();
+
+
+    const currentHeight =
+        getBlockHeight(
+            runtime.networkState
+        );
+
+
+    /*
+     * This is the dashboard-side mining gate.
+     *
+     * A brand-new chain is allowed to create
+     * its first reward block.
+     *
+     * After block #0, mining requires real
+     * pending transaction work.
+     */
+    if (
+        pending.length === 0 &&
+        currentHeight > 0
+    ) {
+
+        setStage(
+            runtime,
+            "READY",
+            "No pending blockchain work. Create a transaction before mining another block."
+        );
+
+
+        addActivity(
+            runtime,
+            {
+                type: "system",
+
+                title:
+                    "Mining waiting",
+
+                detail:
+                    "Mempool is empty. Create a transaction before mining another block.",
+
+                timestamp:
+                    Date.now(),
+            }
+        );
+
+
+        showToast(
+            runtime,
+            "Mempool is empty. Create a transaction first.",
+            "info"
+        );
+
+
+        render(runtime);
+
+        return;
+    }
+
 
     runtime.mining =
         true;
@@ -1348,32 +1603,45 @@ async function handleMine(
     runtime.miningHash =
         "";
 
+
+    const bootstrap =
+        currentHeight === 0 &&
+        pending.length === 0;
+
+
     setStage(
         runtime,
         "MINING",
-        pending.length
-            ? `${pending.length} transaction(s) selected.`
-            : "No pending payments. Mining coinbase reward block."
+        bootstrap
+            ? "Creating the first NovaChain bootstrap block and miner reward."
+            : `${pending.length} transaction(s) selected for Proof of Work.`
     );
+
 
     addActivity(
         runtime,
         {
             type: "mining",
+
             title:
                 "Proof of Work started",
+
             detail:
-                pending.length
-                    ? `${pending.length} pending transaction(s) plus miner reward.`
-                    : "Coinbase-only block plus miner reward.",
+                bootstrap
+                    ? "Bootstrap block · coinbase reward only."
+                    : `${pending.length} pending transaction(s) plus miner reward.`,
+
             timestamp:
                 Date.now(),
         }
     );
 
+
     render(runtime);
 
+
     try {
+
         const block =
             await runtime.networkState.minePendingTransactions({
                 minerAddress:
@@ -1384,13 +1652,16 @@ async function handleMine(
 
                 onProgress:
                     (progress) => {
+
                         runtime.miningNonce =
                             progress.nonce ??
                             0;
 
+
                         runtime.miningHash =
                             progress.hash ??
                             "";
+
 
                         renderMiningLive(
                             runtime
@@ -1398,11 +1669,14 @@ async function handleMine(
                     },
             });
 
+
         runtime.mining =
             false;
 
+
         runtime.lastBlockHeight =
             block.index;
+
 
         setStage(
             runtime,
@@ -1410,31 +1684,40 @@ async function handleMine(
             `Block #${block.index} accepted by the local chain.`
         );
 
+
         addActivity(
             runtime,
             {
                 type: "block",
+
                 title:
                     `Block #${block.index} confirmed`,
+
                 detail:
                     `PoW satisfied · nonce ${block.nonce} · ${block.transactions.length} transaction(s)`,
+
                 timestamp:
                     Date.now(),
             }
         );
 
+
         addActivity(
             runtime,
             {
                 type: "reward",
+
                 title:
                     "Mining reward credited",
+
                 detail:
                     "+50,000 NNC · +0.500000 NVC",
+
                 timestamp:
                     Date.now(),
             }
         );
+
 
         showToast(
             runtime,
@@ -1442,15 +1725,19 @@ async function handleMine(
             "success"
         );
 
+
         render(runtime);
+
 
         window.setTimeout(
             () => {
+
                 if (
                     runtime.mining
                 ) {
                     return;
                 }
+
 
                 setStage(
                     runtime,
@@ -1458,19 +1745,24 @@ async function handleMine(
                     "Node is ready."
                 );
 
+
                 render(runtime);
+
             },
             2200
         );
 
     } catch (error) {
+
         runtime.mining =
             false;
+
 
         console.error(
             "NovaChain mining failed:",
             error
         );
+
 
         setStage(
             runtime,
@@ -1478,24 +1770,30 @@ async function handleMine(
             getErrorMessage(error)
         );
 
+
         addActivity(
             runtime,
             {
                 type: "error",
+
                 title:
                     "Mining failed",
+
                 detail:
                     getErrorMessage(error),
+
                 timestamp:
                     Date.now(),
             }
         );
+
 
         showToast(
             runtime,
             getErrorMessage(error),
             "error"
         );
+
 
         render(runtime);
     }
@@ -1514,10 +1812,12 @@ function startRefresh(
     runtime.refreshTimer =
         window.setInterval(
             () => {
+
                 if (
                     !runtime.root
                         .isConnected
                 ) {
+
                     window.clearInterval(
                         runtime.refreshTimer
                     );
@@ -1525,34 +1825,42 @@ function startRefresh(
                     return;
                 }
 
+
                 const height =
                     getBlockHeight(
                         runtime.networkState
                     );
 
+
                 if (
                     height !==
                     runtime.lastBlockHeight
                 ) {
+
                     runtime.lastBlockHeight =
                         height;
+
 
                     if (
                         !runtime.mining
                     ) {
+
                         setStage(
                             runtime,
                             "CONFIRMED",
                             `Block #${height} became the latest local block.`
                         );
 
+
                         render(runtime);
                     }
                 }
 
+
                 updateCounters(
                     runtime
                 );
+
             },
             700
         );
@@ -1561,7 +1869,7 @@ function startRefresh(
 
 /*
 |--------------------------------------------------------------------------
-| Render helpers
+| Render Helpers
 |--------------------------------------------------------------------------
 */
 
@@ -1575,10 +1883,12 @@ function flowStep(
         currentStage ===
         labelToStage(label);
 
+
     const complete =
         completedStages.includes(
             currentStage
         );
+
 
     return `
         <div
@@ -1592,6 +1902,7 @@ function flowStep(
                     : ""
             }"
         >
+
             <span class="flow-number">
                 ${number}
             </span>
@@ -1601,6 +1912,7 @@ function flowStep(
                     label
                 )}
             </span>
+
         </div>
     `;
 }
@@ -1618,12 +1930,14 @@ function consensusNode(
             currentStage
         );
 
+
     const complete =
         currentStage ===
-        "CONFIRMED" &&
+            "CONFIRMED" &&
         activeStages.includes(
             "CONFIRMED"
         );
+
 
     return `
         <div
@@ -1637,11 +1951,14 @@ function consensusNode(
                     : ""
             }"
         >
+
             <span class="consensus-number">
                 ${number}
             </span>
 
+
             <div class="consensus-node-body">
+
                 <strong>
                     ${escapeHtml(
                         title
@@ -1653,7 +1970,9 @@ function consensusNode(
                         detail
                     )}
                 </small>
+
             </div>
+
         </div>
     `;
 }
@@ -1666,6 +1985,7 @@ function metric(
 ) {
     return `
         <div class="metric">
+
             <span class="metric-label">
                 ${escapeHtml(
                     label
@@ -1683,6 +2003,7 @@ function metric(
                     unit
                 )}
             </small>
+
         </div>
     `;
 }
@@ -1696,10 +2017,12 @@ function renderActivity(
         ...activities,
     ];
 
+
     for (
         const transaction
         of mempool
     ) {
+
         if (
             !entries.some(
                 (entry) =>
@@ -1707,21 +2030,27 @@ function renderActivity(
                     transaction.id
             )
         ) {
+
             entries.push({
                 type: "pending",
+
                 title:
                     "Transaction pending",
+
                 detail:
                     `TX ${shortId(
                         transaction.id
                     )}`,
+
                 timestamp:
                     Date.now(),
+
                 txId:
                     transaction.id,
             });
         }
     }
+
 
     entries.sort(
         (a, b) =>
@@ -1729,11 +2058,13 @@ function renderActivity(
             a.timestamp
     );
 
+
     const visible =
         entries.slice(
             0,
             8
         );
+
 
     return visible.length
         ? visible
@@ -1744,13 +2075,16 @@ function renderActivity(
                             entry.type
                         )}"
                     >
+
                         <div class="activity-icon">
                             ${activityIcon(
                                 entry.type
                             )}
                         </div>
 
+
                         <div class="activity-copy">
+
                             <strong>
                                 ${escapeHtml(
                                     entry.title
@@ -1762,26 +2096,35 @@ function renderActivity(
                                     entry.detail
                                 )}
                             </small>
+
                         </div>
+
 
                         <time>
                             ${relativeTime(
                                 entry.timestamp
                             )}
                         </time>
+
                     </article>
                 `
             )
             .join("")
         : `
             <div class="empty-state">
-                <span>☁</span>
+
+                <span>
+                    ☁
+                </span>
+
                 <strong>
                     No activity yet.
                 </strong>
+
                 <small>
                     The node is waiting for an operation.
                 </small>
+
             </div>
         `;
 }
@@ -1791,15 +2134,22 @@ function renderBlock(
     block
 ) {
     if (!block) {
+
         return `
             <div class="empty-state">
-                <span>▣</span>
+
+                <span>
+                    ▣
+                </span>
+
                 <strong>
                     No block available.
                 </strong>
+
             </div>
         `;
     }
+
 
     return `
         <div class="latest-block">
@@ -1824,6 +2174,7 @@ function renderBlock(
             <div class="block-details">
 
                 <div>
+
                     <span>
                         HASH
                     </span>
@@ -1835,10 +2186,12 @@ function renderBlock(
                             )
                         )}
                     </code>
+
                 </div>
 
 
                 <div>
+
                     <span>
                         MERKLE ROOT
                     </span>
@@ -1850,10 +2203,12 @@ function renderBlock(
                             )
                         )}
                     </code>
+
                 </div>
 
 
                 <div>
+
                     <span>
                         DIFFICULTY
                     </span>
@@ -1866,17 +2221,23 @@ function renderBlock(
                             )
                         )}
                     </strong>
+
                 </div>
 
 
                 <div>
+
                     <span>
                         TRANSACTIONS
                     </span>
 
                     <strong>
-                        ${block.transactions?.length ?? 0}
+                        ${
+                            block.transactions?.length ??
+                            0
+                        }
                     </strong>
+
                 </div>
 
             </div>
@@ -1900,20 +2261,25 @@ function renderMiningLive(
             ".activity-spotlight"
         );
 
+
     if (!spotlight) {
         return;
     }
 
+
     spotlight.classList.add(
         "spotlight-mining"
     );
+
 
     const readout =
         spotlight.querySelector(
             ".mining-readout"
         );
 
+
     if (readout) {
+
         readout.outerHTML =
             renderMiningReadout(
                 runtime
@@ -1931,6 +2297,7 @@ function renderMiningReadout(
                 runtime.miningStartedAt
             : 0;
 
+
     return `
         <div class="mining-readout">
 
@@ -1942,12 +2309,15 @@ function renderMiningReadout(
 
                 <strong>
                     DIFFICULTY 3
-                </strong>            </div>
+                </strong>
+
+            </div>
 
 
             <div class="mining-main">
 
                 <div class="nonce-display">
+
                     <span>
                         NONCE
                     </span>
@@ -1957,6 +2327,7 @@ function renderMiningReadout(
                             runtime.miningNonce
                         )}
                     </strong>
+
                 </div>
 
 
@@ -2019,17 +2390,24 @@ function updateCounters(
             runtime.wallet.address
         );
 
+
     const balanceElement =
         runtime.root.querySelector(
             ".balance-number"
         );
 
+
     if (balanceElement) {
+
         balanceElement.textContent =
-            formatNvc(balance);
+            formatNvc(
+                balance
+            );
     }
 
+
     const values = [
+
         getBlockHeight(
             runtime.networkState
         ),
@@ -2047,12 +2425,17 @@ function updateCounters(
             .length,
     ];
 
+
     runtime.root
         .querySelectorAll(
             ".telemetry-card .metric strong"
         )
         .forEach(
-            (element, index) => {
+            (
+                element,
+                index
+            ) => {
+
                 element.textContent =
                     String(
                         values[index]
@@ -2076,9 +2459,11 @@ function setStage(
     runtime.stage =
         stage;
 
+
     if (!detail) {
         return;
     }
+
 
     addActivity(
         runtime,
@@ -2087,9 +2472,12 @@ function setStage(
                 stage === "MINING"
                     ? "mining"
                     : "system",
+
             title:
                 `State: ${stage}`,
+
             detail,
+
             timestamp:
                 Date.now(),
         }
@@ -2101,17 +2489,23 @@ function labelToStage(
     label
 ) {
     const values = {
+
         CREATE:
             "CREATE",
+
         SIGN:
             "SIGNING",
+
         MEMPOOL:
             "MEMPOOL",
+
         "PROOF OF WORK":
             "MINING",
+
         BLOCK:
             "CONFIRMED",
     };
+
 
     return (
         values[label] ??
@@ -2134,22 +2528,28 @@ function openModal(
             id
         );
 
+
     if (!element) {
         return;
     }
 
+
     element.hidden =
         false;
 
+
     window.requestAnimationFrame(
         () => {
+
             element.classList.add(
                 "is-open"
             );
 
+
             element.querySelector(
                 "input"
             )?.focus();
+
         }
     );
 }
@@ -2163,18 +2563,23 @@ function closeModal(
             id
         );
 
+
     if (!element) {
         return;
     }
+
 
     element.classList.remove(
         "is-open"
     );
 
+
     window.setTimeout(
         () => {
+
             element.hidden =
                 true;
+
         },
         160
     );
@@ -2185,16 +2590,20 @@ async function copyAddress(
     runtime
 ) {
     try {
+
         await navigator.clipboard.writeText(
             runtime.wallet.address
         );
+
 
         showToast(
             runtime,
             "Wallet address copied.",
             "success"
         );
+
     } catch {
+
         showToast(
             runtime,
             "Could not copy the wallet address.",
@@ -2214,30 +2623,38 @@ function showToast(
             "#nova-toast"
         );
 
+
     if (!toast) {
         return;
     }
 
+
     toast.textContent =
         message;
 
+
     toast.dataset.type =
         type;
+
 
     toast.classList.add(
         "is-visible"
     );
 
+
     window.clearTimeout(
         toast._novaTimer
     );
 
+
     toast._novaTimer =
         window.setTimeout(
             () => {
+
                 toast.classList.remove(
                     "is-visible"
                 );
+
             },
             2800
         );
@@ -2251,6 +2668,7 @@ function addActivity(
     runtime.activity.unshift(
         entry
     );
+
 
     runtime.activity =
         runtime.activity.slice(
@@ -2267,6 +2685,7 @@ function scrollTo(
         target ===
         "top"
     ) {
+
         window.scrollTo({
             top: 0,
             behavior:
@@ -2276,11 +2695,13 @@ function scrollTo(
         return;
     }
 
+
     document.getElementById(
         target
     )?.scrollIntoView({
         behavior:
             "smooth",
+
         block:
             "start",
     });
@@ -2295,6 +2716,7 @@ function updateNav(
         ".nav-item"
     ).forEach(
         (item) => {
+
             item.classList.toggle(
                 "active",
                 item.dataset.scroll ===
@@ -2340,12 +2762,14 @@ function formatNvc(
     nnc
 ) {
     return Number(
-        nnc / NNC_PER_NVC
+        nnc /
+            NNC_PER_NVC
     ).toLocaleString(
         "en-IN",
         {
             minimumFractionDigits:
                 6,
+
             maximumFractionDigits:
                 6,
         }
@@ -2371,8 +2795,10 @@ function shortId(
         return "—";
     }
 
+
     const text =
         String(value);
+
 
     if (
         text.length <= 18
@@ -2380,10 +2806,16 @@ function shortId(
         return text;
     }
 
+
     return (
-        text.slice(0, 9) +
+        text.slice(
+            0,
+            9
+        ) +
         "…" +
-        text.slice(-7)
+        text.slice(
+            -7
+        )
     );
 }
 
@@ -2398,19 +2830,26 @@ function relativeTime(
                 timestamp
         );
 
-    if (delta < 1000) {
+
+    if (
+        delta < 1000
+    ) {
         return "now";
     }
+
 
     if (
         delta < 60_000
     ) {
         return (
             Math.floor(
-                delta / 1000
-            ) + "s"
+                delta /
+                    1000
+            ) +
+            "s"
         );
     }
+
 
     if (
         delta < 3_600_000
@@ -2419,15 +2858,18 @@ function relativeTime(
             Math.floor(
                 delta /
                     60_000
-            ) + "m"
+            ) +
+            "m"
         );
     }
+
 
     return (
         Math.floor(
             delta /
                 3_600_000
-        ) + "h"
+        ) +
+        "h"
     );
 }
 
@@ -2474,7 +2916,10 @@ function getErrorMessage(
         return error.message;
     }
 
-    return String(error);
+
+    return String(
+        error
+    );
 }
 
 
@@ -2488,19 +2933,26 @@ function getHeadline(
     stage
 ) {
     const values = {
+
         READY:
             "YOUR NODE IS ALIVE.",
+
         CREATE:
             "BUILDING THE TRANSACTION.",
+
         SIGNING:
             "SIGNING THE PAYMENT.",
+
         MEMPOOL:
             "WAITING IN THE MEMPOOL.",
+
         MINING:
             "SEARCHING FOR THE BLOCK.",
+
         CONFIRMED:
             "BLOCK FOUND. CHAIN UPDATED.",
     };
+
 
     return (
         values[stage] ??
@@ -2511,27 +2963,42 @@ function getHeadline(
 
 function getDescription(
     stage,
-    mempoolSize
+    mempoolSize,
+    blockHeight
 ) {
     if (
         stage ===
         "MEMPOOL"
     ) {
-        return `${mempoolSize} transaction${mempoolSize === 1 ? "" : "s"} currently waiting for inclusion.`;
+
+        return `${mempoolSize} transaction${
+            mempoolSize === 1
+                ? ""
+                : "s"
+        } currently waiting for inclusion.`;
     }
 
+
     const values = {
+
         READY:
-            "Your browser node is connected to its local ledger. Mine a block to create the first real UTXO and reward.",
+            blockHeight === 0
+                ? "Your browser node is connected to its local ledger. Mine the first bootstrap block to create the network's first spendable UTXO and miner reward."
+                : "Your browser node is connected to its local ledger. Create a transaction before mining another block.",
+
         CREATE:
             "The wallet is constructing a payment from spendable UTXOs.",
+
         SIGNING:
             "The wallet is signing the payment with its persistent local keypair.",
+
         MINING:
             "The miner is repeatedly hashing the block header until the Proof of Work target is satisfied.",
+
         CONFIRMED:
             "A valid block has been accepted and the local UTXO state has been updated.",
     };
+
 
     return (
         values[stage] ??
@@ -2542,11 +3009,13 @@ function getDescription(
 
 function operationDetail(
     runtime,
-    snapshot
+    snapshot,
+    blockHeight
 ) {
     if (
         runtime.mining
     ) {
+
         return `Nonce ${formatInteger(
             runtime.miningNonce
         )} · ${
@@ -2558,19 +3027,32 @@ function operationDetail(
         }`;
     }
 
+
     if (
         runtime.stage ===
         "MEMPOOL"
     ) {
+
         return `${snapshot.mempool.length} pending transaction(s)`;
     }
+
 
     if (
         runtime.stage ===
         "CONFIRMED"
     ) {
+
         return `Block #${snapshot.chainHeight} is now the latest local block`;
     }
+
+
+    if (
+        blockHeight === 0
+    ) {
+
+        return "Genesis state · ready for bootstrap mining";
+    }
+
 
     return `Block #${snapshot.chainHeight} · local node ready`;
 }
@@ -2580,13 +3062,26 @@ function stageIcon(
     stage
 ) {
     const values = {
-        READY: "✦",
-        CREATE: "＋",
-        SIGNING: "⌁",
-        MEMPOOL: "≋",
-        MINING: "⛏",
-        CONFIRMED: "✓",
+
+        READY:
+            "✦",
+
+        CREATE:
+            "＋",
+
+        SIGNING:
+            "⌁",
+
+        MEMPOOL:
+            "≋",
+
+        MINING:
+            "⛏",
+
+        CONFIRMED:
+            "✓",
     };
+
 
     return (
         values[stage] ??
@@ -2599,14 +3094,29 @@ function activityIcon(
     type
 ) {
     const values = {
-        system: "✦",
-        transaction: "↗",
-        mining: "⛏",
-        block: "▣",
-        reward: "★",
-        pending: "☁",
-        error: "!",
+
+        system:
+            "✦",
+
+        transaction:
+            "↗",
+
+        mining:
+            "⛏",
+
+        block:
+            "▣",
+
+        reward:
+            "★",
+
+        pending:
+            "☁",
+
+        error:
+            "!",
     };
+
 
     return (
         values[type] ??
