@@ -82,6 +82,8 @@ export class NetworkState {
 
         this.persistenceAvailable =
             typeof indexedDB !== "undefined";
+        this.lastSavedAt = null;
+        this.persistenceError = null;
     }
 
     /*
@@ -180,6 +182,11 @@ export class NetworkState {
             this.utxos,
             address
         );
+    }
+
+    // Spendable funds exclude outputs reserved by pending transactions.
+    getAvailableBalance(address) {
+        return getBalance(this.getSpendableUTXOs(address), address);
     }
 
     /*
@@ -1020,6 +1027,12 @@ export class NetworkState {
             isMining:
                 this.isMining,
 
+            persistence: {
+                available: this.persistenceAvailable,
+                lastSavedAt: this.lastSavedAt,
+                error: this.persistenceError,
+            },
+
             network:
                 this.getNetworkStatus(),
         };
@@ -1155,6 +1168,8 @@ export class NetworkState {
                 }
             }
 
+            this.lastSavedAt = stored.savedAt ?? null;
+            this.persistenceError = null;
             return true;
         } catch (error) {
             console.warn(
@@ -1174,6 +1189,7 @@ export class NetworkState {
         }
 
         try {
+            const savedAt = Date.now();
             await this.writePersistedState({
                 version: 1,
 
@@ -1190,10 +1206,12 @@ export class NetworkState {
                 mempool:
                     this.getMempoolTransactions(),
 
-                savedAt:
-                    Date.now(),
+                savedAt,
             });
+            this.lastSavedAt = savedAt;
+            this.persistenceError = null;
         } catch (error) {
+            this.persistenceError = error?.message ?? String(error);
             console.warn(
                 "NovaChain local ledger persistence failed.",
                 error

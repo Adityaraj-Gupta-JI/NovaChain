@@ -131,6 +131,9 @@ function render(runtime) {
         networkState.getBalance(
             wallet.address
         );
+    const availableBalance = networkState.getAvailableBalance(wallet.address);
+    const walletUTXOs = networkState.getUTXOs().filter(u => u.address === wallet.address);
+    const chainRewards = networkState.getUTXOs().filter(u => u.address !== wallet.address);
 
     const latestBlock =
         networkState.getLatestBlock();
@@ -446,6 +449,14 @@ function render(runtime) {
                                     balance
                                 )} NNC
                             </div>
+                            <div class="balance-subvalue" data-wallet-available>
+                                Spendable: ${formatNvc(availableBalance)} NVC · ${walletUTXOs.length} unspent output(s)
+                            </div>
+                            <p data-wallet-explanation style="max-width:34rem;line-height:1.55;font-size:0.8rem;opacity:0.85;margin-top:0.6rem;">
+                                ${balance === 0
+                                    ? `This wallet has no confirmed NVC. ${chainRewards.length ? "Other wallets hold the chain's mined rewards. Mine to THIS wallet or send NVC here from a funded wallet." : "Mine the first reward block on this node, or receive NVC from another wallet."}`
+                                    : "Your balance is derived from confirmed blockchain UTXOs for this wallet, and recovered from IndexedDB on refresh."}
+                            </p>
 
                         </div>
 
@@ -873,7 +884,11 @@ function render(runtime) {
                     </summary>
 
 
-                    <pre>${escapeHtml(
+                    <div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin:0.8rem 0;">
+                        <button type="button" data-action="copy-node-state" class="copy-button">COPY JSON</button>
+                        <button type="button" data-action="download-node-state" class="copy-button">EXPORT JSON</button>
+                    </div>
+                    <pre data-raw-node-state style="max-height:28rem;overflow:auto;user-select:text;">${escapeHtml(
                         JSON.stringify(
                             snapshot,
                             null,
@@ -1028,8 +1043,8 @@ function render(runtime) {
                                 id="send-amount"
                                 name="amount"
                                 type="number"
-                                min="0.000001"
-                                step="0.000001"
+                                min="0.00001"
+                                step="0.00001"
                                 placeholder="0.000000"
                                 required
                             />
@@ -1229,6 +1244,14 @@ function bindEvents(runtime) {
                     break;
 
 
+                case "copy-node-state":
+                    await copyNodeState(runtime);
+                    break;
+
+                case "download-node-state":
+                    downloadNodeState(runtime);
+                    break;
+
                 case "copy":
 
                     await copyAddress(
@@ -1365,11 +1388,17 @@ async function handleSend(
     }
 
 
-    const amountNnc =
-        Math.round(
-            amountNvc *
-            NNC_PER_NVC
-        );
+    const scaledAmount = amountNvc * NNC_PER_NVC;
+    if (Math.abs(scaledAmount - Math.round(scaledAmount)) > 0.0000001) {
+        showToast(runtime, "Use increments of 0.00001 NVC (1 NNC).", "error");
+        return;
+    }
+    const amountNnc = Math.round(scaledAmount);
+    const spendable = runtime.networkState.getAvailableBalance(runtime.wallet.address);
+    if (amountNnc > spendable) {
+        showToast(runtime, `Insufficient spendable balance. Available: ${formatNvc(spendable)} NVC.`, "error");
+        return;
+    }
 
 
     if (
@@ -1882,9 +1911,8 @@ function startRefresh(
                 }
 
 
-                updateCounters(
-                    runtime
-                );
+                updateCounters(runtime);
+                updateRawState(runtime);
 
             },
             700
@@ -2428,6 +2456,17 @@ function updateCounters(
             formatNvc(
                 balance
             );
+    }
+    const available = runtime.root.querySelector("[data-wallet-available]");
+    if (available) {
+        const count = runtime.networkState.getUTXOs().filter(u => u.address === runtime.wallet.address).length;
+        available.textContent = `Spendable: ${formatNvc(runtime.networkState.getAvailableBalance(runtime.wallet.address))} NVC · ${count} unspent output(s)`;
+    }
+    const explanation = runtime.root.querySelector("[data-wallet-explanation]");
+    if (explanation) {
+        explanation.textContent = balance === 0
+            ? "No confirmed balance for this wallet. Rewards mined by other wallets do not belong to this address. Mine a reward or receive funds from a funded wallet."
+            : "Confirmed balance reconstructed from blockchain UTXOs; persisted locally across refreshes.";
     }
 
 
@@ -3157,4 +3196,57 @@ function nextFrame() {
                 resolve
             )
     );
+}
+
+// Public state export only. Never include private CryptoKeys or IndexedDB wallet records.
+function serializedNodeState(runtime) {
+    return JSON.stringify({
+        ...runtime.networkState.getStateSnapshot(),
+        wallet: {
+            address: runtime.wallet.address,
+            balanceNNC: runtime.networkState.getBalance(runtime.wallet.address),
+            spendableNNC: runtime.networkState.getAvailableBalance(runtime.wallet.address),
+        },
+        exportedAt: new Date().toISOString(),
+    }, null, 2);
+}
+
+async function copyNodeState(runtime) {
+    const json = serializedNodeState(runtime);
+    try {
+        if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+        await navigator.clipboard.writeText(json);
+        showToast(runtime, "Public node state copied as JSON.", "success");
+    } catch {
+        // HTTP localhost is usually secure, but manual selection works even when clipboard permission is denied.
+        const pre = runtime.root.querySelector("[data-raw-node-state]");
+        if (pre) {
+            const selection = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(pre);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+        showToast(runtime, "Clipboard unavailable; raw JSON selected for manual copy.", "info");
+    }
+}
+
+function downloadNodeState(runtime) {
+    const blob = new Blob([serializedNodeState(runtime)], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `novachain-public-state-${Date.now()}.json`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function updateRawState(runtime) {
+    const pre = runtime.root.querySelector("[data-raw-node-state]");
+    if (pre && !window.getSelection()?.toString()) {
+        const next = JSON.stringify(runtime.networkState.getStateSnapshot(), null, 2);
+        if (pre.textContent !== next) pre.textContent = next;
+    }
 }
